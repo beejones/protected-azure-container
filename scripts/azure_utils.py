@@ -66,8 +66,12 @@ def kv_secret_set_quiet(*, vault_name: str, secret_name: str, value: str) -> Non
         
         # If it's not an auth error, or we ran out of retries, raise.
         # Ensure we print stderr so it shows up in CI logs before raising
-        if result.stderr:
-            print(f"[kv] error setting secret: {result.stderr}", file=sys.stderr)
+        # If it's not an auth error, or we ran out of retries, raise.
+        # Ensure we print stderr so it shows up in CI logs before raising
+        print(f"[kv] Error setting secret (exit code {result.returncode}).", file=sys.stderr)
+        print(f"[kv] STDOUT: {result.stdout.strip() if result.stdout else '<empty>'}", file=sys.stderr)
+        print(f"[kv] STDERR: {result.stderr.strip() if result.stderr else '<empty>'}", file=sys.stderr)
+        print(f"[kv] Secret value length: {len(value)} characters", file=sys.stderr)
             
         raise subprocess.CalledProcessError(
             result.returncode,
