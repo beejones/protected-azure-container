@@ -166,6 +166,7 @@ def run_az_command(args: list[str], *, capture_output: bool = True, ignore_error
             print(result.stdout.rstrip(), file=sys.stderr)
         if result.stderr:
             print(result.stderr.rstrip(), file=sys.stderr)
+        sys.stderr.flush()
 
         raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
 

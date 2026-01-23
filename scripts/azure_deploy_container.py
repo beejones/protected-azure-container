@@ -1640,7 +1640,10 @@ def main() -> None:
     identity_id, identity_client_id, identity_tenant_id = get_identity_details(identity_name, rg)
 
     # Recreate container group for identity/env updates.
+    # Delete existing container if any, then wait for Azure to clean up to prevent "Conflict" errors.
     run_az_command(["container", "delete", "--resource-group", rg, "--name", name, "--yes"], capture_output=False, ignore_errors=True)
+    print("[deploy] Waiting 10s for Azure to clean up previous container...")
+    time.sleep(10)
 
     caddy_image = (args.caddy_image or "").strip() or "caddy:2-alpine"
 
