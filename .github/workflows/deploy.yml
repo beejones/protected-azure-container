@@ -1,0 +1,85 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      location:
+        description: 'Azure Region (e.g. westeurope)'
+        required: false
+        default: 'westeurope'
+      environment:
+        description: 'GitHub Environment (for OIDC)'
+        required: true
+        default: 'production'
+
+permissions:
+  id-token: write  # Required for Azure OIDC
+  contents: read   # Required to checkout code
+  packages: write  # Required to push to GHCR
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        client-id: ${{ vars.AZURE_CLIENT_ID }}
+        tenant-id: ${{ vars.AZURE_TENANT_ID }}
+        subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Docker Login
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create .env from secret
+      run: |
+        if [ -z "${{ secrets.RUNTIME_ENV_DOTENV }}" ]; then
+          echo "::error::Secret RUNTIME_ENV_DOTENV is missing!"
+          exit 1
+        fi
+        echo "${{ secrets.RUNTIME_ENV_DOTENV }}" > .env
+        chmod 600 .env
+
+    - name: Deploy to Azure
+      env:
+        GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Map repository vars/secrets to env vars the script expects
+        AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+        AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+        AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        
+        # Deploy config (defaults or overrides)
+        AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'protected-azure-container-rg' }}
+        AZURE_LOCATION: ${{ inputs.location }}
+        AZURE_CONTAINER_NAME: ${{ vars.AZURE_CONTAINER_NAME || 'protected-azure-container' }}
+        GHCR_IMAGE: ghcr.io/${{ github.repository }}:latest
+        AZURE_PUBLIC_DOMAIN: ${{ vars.AZURE_PUBLIC_DOMAIN }}
+        AZURE_ACME_EMAIL: ${{ vars.AZURE_ACME_EMAIL }}
+        BASIC_AUTH_USER: ${{ vars.BASIC_AUTH_USER }}
+        BASIC_AUTH_HASH: ${{ secrets.BASIC_AUTH_HASH }}
+      run: |
+        # Use --no-interactive to ensure no prompts
+        # Use --no-set-vars-secrets because we are already running In Actions
+        python3 scripts/azure_deploy_container.py \
+          --no-interactive \
+          --no-set-vars-secrets \
+          --build-push \
+          --upload-env

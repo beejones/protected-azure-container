@@ -1,0 +1,18 @@
+requests==2.32.5
+
+# Data sources (uncomment when ready to use real APIs)
+# python-binance>=1.0.16
+
+# Development dependencies
+python-dotenv==1.2.1
+
+# For generating Caddy-compatible bcrypt hashes for Basic Auth
+bcrypt>=4.2.0
+
+# Azure ACI deployment helpers
+azure-identity>=1.17.0
+azure-keyvault-secrets>=4.8.0
+setuptools<81
+
+pytest==9.0.2
+pytest-asyncio>=0.23

@@ -1,0 +1,8 @@
+*.log
+.state*/
+.env*
+.venv/
+logs/
+__pycache__/
+out/
+azure/
