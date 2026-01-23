@@ -61,9 +61,15 @@ jobs:
     - name: Build and Push Docker Image
       env:
         IMAGE: ghcr.io/${{ github.repository }}:latest
+        CADDY_MIRROR: ghcr.io/${{ github.repository }}/caddy:2-alpine
       run: |
         docker build -t $IMAGE ./docker
         docker push $IMAGE
+        
+        # Mirror Caddy to GHCR to avoid Docker Hub rate limits/ACE conflicts
+        docker pull caddy:2-alpine
+        docker tag caddy:2-alpine $CADDY_MIRROR
+        docker push $CADDY_MIRROR
 
     - name: Deploy to Azure
       env:
@@ -94,4 +100,5 @@ jobs:
           --no-interactive \
           --no-set-vars-secrets \
           --no-publish \
-          --upload-env
+          --upload-env \
+          --caddy-image ghcr.io/${{ github.repository }}/caddy:2-alpine
