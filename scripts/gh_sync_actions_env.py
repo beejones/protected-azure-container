@@ -316,10 +316,10 @@ def main() -> None:
     )
     ap.add_argument(
         "--azure-app-display-name",
-        default=None,
+        default="github-actions-aci-deploy",
         help=(
             "Optional: if AZURE_CLIENT_ID is missing, look it up by Azure AD App Registration display name "
-            "using `az ad app list --display-name` (requires directory permissions)."
+            "using `az ad app list --display-name` (default: github-actions-aci-deploy)."
         ),
     )
     ap.add_argument(
