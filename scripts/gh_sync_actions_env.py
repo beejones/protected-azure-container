@@ -429,6 +429,9 @@ def main() -> None:
             else:
                 default_branch = _detect_default_branch(repo) or "main"
                 subjects.add(f"repo:{repo}:ref:refs/heads/{default_branch}")
+                # Also authorize the 'production' environment for GitHub Actions deployment jobs
+                subjects.add(f"repo:{repo}:environment:production")
+                
                 current_branch = _detect_current_branch()
                 if current_branch and current_branch != default_branch:
                     subjects.add(f"repo:{repo}:ref:refs/heads/{current_branch}")
