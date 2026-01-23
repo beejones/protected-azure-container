@@ -1639,10 +1639,33 @@ def main() -> None:
     identity_id, identity_client_id, identity_tenant_id = get_identity_details(identity_name, rg)
 
     # Recreate container group for identity/env updates.
-    # Delete existing container if any, then wait for Azure to clean up to prevent "Conflict" errors.
+    # Delete existing container if any, then wait for Azure to fully clean up to prevent "Conflict" errors.
     run_az_command(["container", "delete", "--resource-group", rg, "--name", name, "--yes"], capture_output=False, ignore_errors=True)
-    print("[deploy] Waiting 10s for Azure to clean up previous container...")
-    time.sleep(10)
+    
+    # Wait for container to be fully deleted (not just deletion initiated)
+    print("[deploy] Waiting for previous container to be fully deleted...")
+    max_wait = 120  # seconds
+    poll_interval = 5
+    waited = 0
+    while waited < max_wait:
+        # Check if container still exists
+        result = run_az_command(
+            ["container", "show", "--resource-group", rg, "--name", name, "--query", "provisioningState", "-o", "tsv"],
+            capture_output=True,
+            ignore_errors=True,
+            verbose=False,
+        )
+        if result is None:
+            # Container no longer exists
+            print(f"[deploy] Previous container deleted after {waited}s")
+            break
+        state = str(result).strip().lower()
+        if state in ("deleting", "pending"):
+            print(f"[deploy] Container still {state}... waiting")
+        time.sleep(poll_interval)
+        waited += poll_interval
+    else:
+        print(f"[deploy] Warning: Timed out waiting for container deletion after {max_wait}s, proceeding anyway...")
 
     caddy_image = (args.caddy_image or "").strip() or "caddy:2-alpine"
 
@@ -1685,7 +1708,24 @@ def main() -> None:
 
     print(f"[deploy] wrote: {yaml_path}")
 
-    run_az_command(["container", "create", "--resource-group", rg, "--file", yaml_path], capture_output=False)
+    # Retry container creation with exponential backoff for transient registry errors
+    max_retries = 5
+    base_delay = 10.0  # seconds
+    for attempt in range(1, max_retries + 1):
+        try:
+            run_az_command(["container", "create", "--resource-group", rg, "--file", yaml_path], capture_output=False)
+            break  # Success
+        except subprocess.CalledProcessError as e:
+            err = getattr(e, "stderr", "") or ""
+            # Check if it's a transient registry conflict error
+            is_transient = "Conflict" in err and "RegistryErrorResponse" in err
+            if is_transient and attempt < max_retries:
+                sleep_time = min(60.0, base_delay * (2 ** (attempt - 1)))
+                print(f"[deploy] Registry conflict error (attempt {attempt}/{max_retries}). Retrying in {sleep_time:.0f}s...")
+                time.sleep(sleep_time)
+            else:
+                # Not a transient error or out of retries
+                raise
 
     print("\n[done] Deployed.")
     print(f"  FQDN: {dns_label}.{location}.azurecontainer.io")
