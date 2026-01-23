@@ -933,7 +933,6 @@ def generate_deploy_yaml(
         indent(6, "properties:"),
         indent(8, f"image: {image}"),
         indent(8, "ports:"),
-        indent(8, "ports:"),
         indent(10, f"- port: {DEFAULT_APP_PORT}"),  # 8080 for code-server
         indent(12, "protocol: TCP"),
         indent(8, "resources:"),
