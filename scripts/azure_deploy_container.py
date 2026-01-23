@@ -1191,7 +1191,7 @@ def main() -> None:
 
     # Prefer a stable mirror to avoid Docker Hub rate limiting in ACI.
     # Note: ghcr.io/caddyserver/caddy does not publish a '2-alpine' tag; we use a mirror.
-    parser.add_argument("--caddy-image", default="ghcr.io/beejones/caddy:2-alpine")
+    parser.add_argument("--caddy-image", default="caddy:2-alpine")
 
     args = parser.parse_args()
 
@@ -1642,11 +1642,7 @@ def main() -> None:
     # Recreate container group for identity/env updates.
     run_az_command(["container", "delete", "--resource-group", rg, "--name", name, "--yes"], capture_output=False, ignore_errors=True)
 
-    caddy_image = (args.caddy_image or "").strip() or "ghcr.io/beejones/caddy:2-alpine"
-    # If a Docker Hub shorthand is provided, rewrite it to the GHCR mirror.
-    # This avoids ACI failing when Docker Hub is flaky or rate-limited.
-    if caddy_image == "caddy" or caddy_image.startswith("caddy:"):
-        caddy_image = f"ghcr.io/beejones/{caddy_image}"
+    caddy_image = (args.caddy_image or "").strip() or "caddy:2-alpine"
 
     if args.prefetch_images:
         try:
