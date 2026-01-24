@@ -65,6 +65,24 @@ REQUIRED_FOR_AZURE_LOGIN = {
 }
 
 
+def _supports_color() -> bool:
+    # Respect https://no-color.org/
+    if "NO_COLOR" in os.environ:
+        return False
+    return bool(getattr(sys.stdout, "isatty", lambda: False)())
+
+
+def _color(text: str, code: str) -> str:
+    if not _supports_color():
+        return text
+    return f"\x1b[{code}m{text}\x1b[0m"
+
+
+def _fmt_kv(name: str, value: str) -> str:
+    # Key cyan, value green.
+    return f"{_color(name, '36')}={_color(value, '32')}"
+
+
 def _run(cmd: list[str], *, input_text: str | None = None) -> str:
     def _format_cmd(argv: list[str]) -> str:
         # Avoid leaking secret values in error messages (e.g. `gh secret set ... -b <value>`).
@@ -213,14 +231,14 @@ def _set_secret(*, repo: str, name: str, value: str, dry_run: bool) -> None:
 
 def _set_variable(*, repo: str, name: str, value: str, dry_run: bool) -> None:
     if dry_run:
-        print(f"[dry-run] set var {name}={value!r} (repo={repo})")
+        print(f"[dry-run] set var {_fmt_kv(name, repr(value))} (repo={repo})")
         return
 
     # Prefer `gh variable set` when available.
     if _has_gh_variables():
         try:
             _run(["gh", "variable", "set", name, "-R", repo, "-b", value])
-            print(f"[ok] set var {name} (repo={repo})")
+            print(f"[ok] set var {_fmt_kv(name, repr(value))} (repo={repo})")
             return
         except SystemExit:
             # Fall through to API fallback.
@@ -245,7 +263,7 @@ def _set_variable(*, repo: str, name: str, value: str, dry_run: bool) -> None:
         check=False,
     )
     if p.returncode == 0:
-        print(f"[ok] set var {name} (repo={repo})")
+        print(f"[ok] set var {_fmt_kv(name, repr(value))} (repo={repo})")
         return
 
     err = (p.stderr or "").strip()
@@ -263,7 +281,7 @@ def _set_variable(*, repo: str, name: str, value: str, dry_run: bool) -> None:
                 f"value={value}",
             ]
         )
-        print(f"[ok] set var {name} (repo={repo})")
+        print(f"[ok] set var {_fmt_kv(name, repr(value))} (repo={repo})")
         return
 
     raise SystemExit(f"Command failed ({p.returncode}): gh api (set variable {name})\n{err}")
@@ -374,6 +392,12 @@ def main() -> None:
         # Apply defaults and validate required keys for the dotenv portions.
         runtime_kv = apply_defaults(RUNTIME_SCHEMA, runtime_kv)
         validate_required(RUNTIME_SCHEMA, runtime_kv, context="runtime (.env)")
+
+        # Allow deploy-script-derived values (e.g. AZURE_OIDC_APP_NAME) to satisfy schema validation
+        # when this script is invoked as a subprocess from azure_deploy_container.py.
+        deploy_schema_keys = {spec.key.value for spec in DEPLOY_SCHEMA}
+        deploy_kv_env = {k: v for k, v in os.environ.items() if k in deploy_schema_keys and str(v).strip()}
+        deploy_kv.update(deploy_kv_env)
 
         deploy_kv = apply_defaults(DEPLOY_SCHEMA, deploy_kv)
         # Only require keys that belong to deploy dotenv.
