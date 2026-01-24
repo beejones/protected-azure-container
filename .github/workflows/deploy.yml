@@ -69,8 +69,10 @@ jobs:
         code_server_version_tag() {
           # Returns vX.Y.Z
           local v
-          v=$(docker run --rm --entrypoint code-server "$CODE_SERVER_UPSTREAM" --version 2>/dev/null | head -n 1 | tr -d '\r' | awk '{print $1}')
-          v=${v#v}
+          v=$(docker run --rm --entrypoint code-server "$CODE_SERVER_UPSTREAM" --version 2>/dev/null | head -n 1 | tr -d '\r')
+          # Extract a safe semver from potentially decorated output like:
+          #   4.96.2 [2026-01-24T09:11:04.875Z]
+          v=$(echo "$v" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)
           if [ -z "$v" ]; then
             echo ""
             return 0
@@ -220,8 +222,8 @@ jobs:
         docker tag codercom/code-server:latest $CODE_SERVER_MIRROR
         docker push $CODE_SERVER_MIRROR
 
-        cs_vtag=$(docker run --rm --entrypoint code-server codercom/code-server:latest --version 2>/dev/null | head -n 1 | tr -d '\r' | awk '{print $1}')
-        cs_vtag=${cs_vtag#v}
+        cs_version=$(docker run --rm --entrypoint code-server codercom/code-server:latest --version 2>/dev/null | head -n 1 | tr -d '\r')
+        cs_vtag=$(echo "$cs_version" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)
         if [ -n "$cs_vtag" ]; then
           CODE_SERVER_VERSION_MIRROR=ghcr.io/${{ github.repository }}/code-server:v${cs_vtag}
           docker tag codercom/code-server:latest $CODE_SERVER_VERSION_MIRROR
