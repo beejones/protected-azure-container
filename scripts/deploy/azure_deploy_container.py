@@ -271,6 +271,12 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "--nuke-github-secrets",
+        action="store_true",
+        help="Run scripts/deploy/gh_nuke_secrets.py to delete ALL GitHub Actions secrets/vars before deploying.",
+    )
+
+    parser.add_argument(
         "--validate-dotenv",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -444,6 +450,21 @@ def main() -> None:
 
     # Keep GitHub Actions vars/secrets in sync by default (so CI has what it needs).
     # In CI, pass --no-set-vars-secrets.
+    if bool(args.nuke_github_secrets):
+        nuke_script = repo_root / "scripts" / "deploy" / "gh_nuke_secrets.py"
+        if nuke_script.exists():
+            print(f"🧨 [deploy] Nuking GitHub secrets: python3 {nuke_script}")
+            # We pass --yes if the deploy script is not interactive? 
+            # Actually, gh_nuke_secrets.py is interactive by default. 
+            # If the user passed --no-interactive to this script, we should probably pass --yes to nuke.
+            nuke_cmd = [sys.executable, str(nuke_script)]
+            if not interactive:
+                 nuke_cmd.append("--yes")
+            
+            subprocess.run(nuke_cmd, check=True)
+        else:
+            print(f"⚠️  [deploy] Nuke script not found: {nuke_script}", file=sys.stderr)
+
     if bool(args.set_vars_secrets):
         sync_github_actions_vars_secrets(repo_root=repo_root, deploy_env_path=deploy_env_path, azure_client_id=oidc_client_id)
 
