@@ -59,6 +59,9 @@ Use GitHub’s “Use this template” button, or use `gh` with the current repo
 gh repo create <your-org>/<new-repo> --public --template beejones/protected-azure-container
 ```
 
+Note: this only works if this repo is marked as a **Template repository** in GitHub settings
+(Repo → Settings → General → Template repository). If it isn’t, use Option B.
+
 Note: template-based repos are a snapshot. They do not automatically stay connected to this repo for future updates.
 
 ### Option B: Clone and re-init git
