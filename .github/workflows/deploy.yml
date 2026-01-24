@@ -41,11 +41,11 @@ jobs:
       env:
         CADDY_UPSTREAM: caddy:2-alpine
         # Keep existing tag used elsewhere, plus also publish :latest and :v<version>-alpine
-        CADDY_MIRROR_TRACKING: ghcr.io/beejones/caddy:2-alpine
-        CADDY_MIRROR_REPO: ghcr.io/beejones/caddy
+        CADDY_MIRROR_TRACKING: ghcr.io/${{ github.repository }}/caddy:2-alpine
+        CADDY_MIRROR_REPO: ghcr.io/${{ github.repository }}/caddy
         CODE_SERVER_UPSTREAM: codercom/code-server:latest
         # Publish :latest and :v<version>
-        CODE_SERVER_MIRROR_REPO: ghcr.io/beejones/code-server
+        CODE_SERVER_MIRROR_REPO: ghcr.io/${{ github.repository }}/code-server
       run: |
         set -euo pipefail
 

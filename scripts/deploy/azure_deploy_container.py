@@ -271,6 +271,12 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "--nuke-github-secrets",
+        action="store_true",
+        help="Run scripts/deploy/gh_nuke_secrets.py to delete ALL GitHub Actions secrets/vars before deploying.",
+    )
+
+    parser.add_argument(
         "--validate-dotenv",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -339,6 +345,9 @@ def main() -> None:
     parser.add_argument("--caddy-image", default="caddy:2-alpine")
 
     args = parser.parse_args()
+
+    if not az_logged_in():
+        raise SystemExit("Not logged into Azure. Run: az login")
 
     # Allow --azure-oidc-app-name to satisfy schema validation by surfacing it as an env var.
     if args.azure_oidc_app_name and str(args.azure_oidc_app_name).strip():
@@ -417,8 +426,7 @@ def main() -> None:
 
     # (Non-interactive enforcement is handled by --validate-dotenv, enabled by default.)
 
-    if not az_logged_in():
-        raise SystemExit("Not logged into Azure. Run: az login")
+
 
     # Resolve Azure OIDC App (create if missing) so sync script has correct ID.
     # Prioritize: Env EnvVar -> Arg Default -> Lookup/Create
@@ -442,6 +450,21 @@ def main() -> None:
 
     # Keep GitHub Actions vars/secrets in sync by default (so CI has what it needs).
     # In CI, pass --no-set-vars-secrets.
+    if bool(args.nuke_github_secrets):
+        nuke_script = repo_root / "scripts" / "deploy" / "gh_nuke_secrets.py"
+        if nuke_script.exists():
+            print(f"🧨 [deploy] Nuking GitHub secrets: python3 {nuke_script}")
+            # We pass --yes if the deploy script is not interactive? 
+            # Actually, gh_nuke_secrets.py is interactive by default. 
+            # If the user passed --no-interactive to this script, we should probably pass --yes to nuke.
+            nuke_cmd = [sys.executable, str(nuke_script)]
+            if not interactive:
+                 nuke_cmd.append("--yes")
+            
+            subprocess.run(nuke_cmd, check=True)
+        else:
+            print(f"⚠️  [deploy] Nuke script not found: {nuke_script}", file=sys.stderr)
+
     if bool(args.set_vars_secrets):
         sync_github_actions_vars_secrets(repo_root=repo_root, deploy_env_path=deploy_env_path, azure_client_id=oidc_client_id)
 
