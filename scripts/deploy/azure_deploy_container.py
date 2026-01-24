@@ -42,6 +42,7 @@ from env_schema import (
     SecretsEnum,
     VarsEnum,
     apply_defaults,
+    get_spec,
     parse_dotenv_file,
     validate_cross_field_rules,
     validate_known_keys,
@@ -56,9 +57,8 @@ except ImportError:
     from azure_utils import kv_data_plane_available, kv_secret_set_quiet, run_az_command
 
 
-DEFAULT_CPU_CORES = 1.0
-DEFAULT_MEMORY_GB = 2.0
-DEFAULT_OIDC_APP_NAME = "github-actions-aci-deploy"
+DEFAULT_CPU_CORES = float(get_spec(DEPLOY_SCHEMA, VarsEnum.DEFAULT_CPU_CORES).default or "1.0")
+DEFAULT_MEMORY_GB = float(get_spec(DEPLOY_SCHEMA, VarsEnum.DEFAULT_MEMORY_GB).default or "2.0")
 
 
 # Keep helper wiring centralized here; `main()` continues to use the historic names.
@@ -253,8 +253,11 @@ def main() -> None:
 
     parser.add_argument(
         "--azure-oidc-app-name",
-        default=DEFAULT_OIDC_APP_NAME,
-        help=f"Azure AD App Registration name for GitHub Actions OIDC (default: {DEFAULT_OIDC_APP_NAME})",
+        default=None,
+        help=(
+            "Azure AD App Registration name for GitHub Actions OIDC (required; set AZURE_OIDC_APP_NAME in .env.deploy "
+            "or pass --azure-oidc-app-name)"
+        ),
     )
 
     parser.add_argument(
@@ -318,14 +321,28 @@ def main() -> None:
         help="Pre-pull Caddy image locally to validate it exists (default: enabled)",
     )
 
-    parser.add_argument("--cpu", type=float, default=None, help=f"CPU cores (default: {DEFAULT_CPU_CORES})")
-    parser.add_argument("--memory", type=float, default=None, help=f"Memory GB (default: {DEFAULT_MEMORY_GB})")
+    parser.add_argument(
+        "--cpu",
+        type=float,
+        default=None,
+        help=f"CPU cores (default: {VarsEnum.DEFAULT_CPU_CORES.value} from .env.deploy, fallback {DEFAULT_CPU_CORES})",
+    )
+    parser.add_argument(
+        "--memory",
+        type=float,
+        default=None,
+        help=f"Memory GB (default: {VarsEnum.DEFAULT_MEMORY_GB.value} from .env.deploy, fallback {DEFAULT_MEMORY_GB})",
+    )
 
     # Prefer a stable mirror to avoid Docker Hub rate limiting in ACI.
     # Note: ghcr.io/caddyserver/caddy does not publish a '2-alpine' tag; we use a mirror.
     parser.add_argument("--caddy-image", default="caddy:2-alpine")
 
     args = parser.parse_args()
+
+    # Allow --azure-oidc-app-name to satisfy schema validation by surfacing it as an env var.
+    if args.azure_oidc_app_name and str(args.azure_oidc_app_name).strip():
+        os.environ[VarsEnum.AZURE_OIDC_APP_NAME.value] = str(args.azure_oidc_app_name).strip()
 
     # scripts/deploy/azure_deploy_container.py -> repo root is 2 parents up.
     repo_root = Path(__file__).resolve().parents[2]
@@ -366,6 +383,12 @@ def main() -> None:
         # If neither exists, materialize .env.deploy if we have env vars (CI case)
         materialize_deploy_env_file_if_missing(path=deploy_env_path)
 
+    # Treat AZURE_OIDC_APP_NAME as deploy-script-derived when missing.
+    # We keep it mandatory in the schema for determinism, but avoid forcing users
+    # to hand-edit generated .env.deploy files.
+    if not (os.getenv(VarsEnum.AZURE_OIDC_APP_NAME.value) or (args.azure_oidc_app_name or "").strip()):
+        os.environ[VarsEnum.AZURE_OIDC_APP_NAME.value] = f"{repo_root.name}-github-actions-oidc"
+
     # Validate up-front so we fail fast with a full list of missing/invalid keys.
     # This avoids later partial failures like "Missing resource group".
     if bool(args.validate_dotenv):
@@ -401,7 +424,18 @@ def main() -> None:
     # Prioritize: Env EnvVar -> Arg Default -> Lookup/Create
     oidc_client_id = (os.getenv(VarsEnum.AZURE_CLIENT_ID.value) or "").strip()
     if not oidc_client_id and bool(args.set_vars_secrets):
-        oidc_app_name = (args.azure_oidc_app_name or DEFAULT_OIDC_APP_NAME).strip()
+        oidc_app_name = (
+            (args.azure_oidc_app_name or "").strip()
+            or (os.getenv(VarsEnum.AZURE_OIDC_APP_NAME.value) or "").strip()
+        )
+        if not oidc_app_name:
+            if interactive and not bool(args.validate_dotenv):
+                oidc_app_name = prompt_value("Azure OIDC App Registration name")
+            if not oidc_app_name:
+                raise SystemExit(
+                    "Missing Azure OIDC app name. Set AZURE_OIDC_APP_NAME in .env.deploy (recommended) "
+                    "or pass --azure-oidc-app-name."
+                )
         oidc_client_id = ensure_oidc_app_and_sp(display_name=oidc_app_name)
         # Set in env so downstream logic can use it
         os.environ[VarsEnum.AZURE_CLIENT_ID.value] = oidc_client_id
@@ -481,6 +515,9 @@ def main() -> None:
             updates[VarsEnum.AZURE_TENANT_ID.value] = tenant_id
         if subscription_id:
             updates[VarsEnum.AZURE_SUBSCRIPTION_ID.value] = subscription_id
+        oidc_app_name_for_writeback = (os.getenv(VarsEnum.AZURE_OIDC_APP_NAME.value) or "").strip()
+        if oidc_app_name_for_writeback:
+            updates[VarsEnum.AZURE_OIDC_APP_NAME.value] = oidc_app_name_for_writeback
         if updates:
             write_dotenv_values(path=deploy_env_path, updates=updates, create=True)
             print(f"🔑 [env] Updated {deploy_env_path} with derived Azure IDs")

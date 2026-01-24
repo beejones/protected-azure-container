@@ -38,6 +38,7 @@ class VarsEnum(str, Enum):
     AZURE_CLIENT_ID = "AZURE_CLIENT_ID"
     AZURE_TENANT_ID = "AZURE_TENANT_ID"
     AZURE_SUBSCRIPTION_ID = "AZURE_SUBSCRIPTION_ID"
+    AZURE_OIDC_APP_NAME = "AZURE_OIDC_APP_NAME"
 
     # Azure deployment config
     AZURE_RESOURCE_GROUP = "AZURE_RESOURCE_GROUP"
@@ -133,6 +134,12 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
     EnvKeySpec(
         key=VarsEnum.AZURE_SUBSCRIPTION_ID,
         mandatory=False,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AZURE_OIDC_APP_NAME,
+        mandatory=True,
+        default=None,
         targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
     ),
     EnvKeySpec(

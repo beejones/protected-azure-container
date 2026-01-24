@@ -24,9 +24,11 @@ sys.path.append(str(Path(__file__).parent))
 from env_schema import (
     DEPLOY_SCHEMA,
     RUNTIME_SCHEMA,
+    EnvTarget,
     EnvValidationError,
     VarsEnum,
     apply_defaults,
+    filter_schema_by_targets,
     parse_dotenv_file,
     validate_cross_field_rules,
     validate_known_keys,
@@ -83,7 +85,11 @@ def _validate_deploy(deploy_path: Path | None) -> None:
     if not merged.get(VarsEnum.AZURE_DNS_LABEL.value):
         merged[VarsEnum.AZURE_DNS_LABEL.value] = merged.get(VarsEnum.AZURE_CONTAINER_NAME.value, "").strip()
 
-    validate_required(DEPLOY_SCHEMA, merged, context=context)
+    # Only require keys that are meant to live in `.env.deploy`.
+    # (E.g. GH Actions meta-secret RUNTIME_ENV_DOTENV is mandatory for CI wiring,
+    # but it is not expected to be present in `.env.deploy`.)
+    deploy_dotenv_specs = filter_schema_by_targets(DEPLOY_SCHEMA, include={EnvTarget.DOTENV_DEPLOY})
+    validate_required(deploy_dotenv_specs, merged, context=context)
     validate_cross_field_rules(deploy_kv=merged, context=context)
 
 
