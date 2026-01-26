@@ -145,6 +145,12 @@ This repo uses a strict, schema-driven set of env keys.
 See env.example and env.deploy.example for the canonical keys.
 If you need to add a new key, follow: [docs/deploy/ENV_SCHEMA.md](docs/deploy/ENV_SCHEMA.md).
 
+## Deployment Customization
+
+Downstream consumers can customize the deployment process (e.g., override images, resources, or patch YAML) using **Deployment Hooks**. This prevents the need to maintain a fork with modified core scripts.
+
+See: [docs/deploy/HOOKS.md](docs/deploy/HOOKS.md)
+
 ## Migration Guide
 
 ### Renamed Variables (Jan 2026)

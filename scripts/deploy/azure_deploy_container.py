@@ -34,6 +34,7 @@ sys.path.append(str(Path(__file__).parent))
 import azure_deploy_container_helpers as deploy_helpers
 import azure_deploy_yaml_helpers as yaml_helpers
 import docker_compose_helpers as compose_helpers
+import deploy_hooks
 
 from env_schema import (
     DEPLOY_SCHEMA,
@@ -379,6 +380,17 @@ def main() -> None:
         help="Service name in docker-compose.yml for the caddy sidecar (default: auto-detect)",
     )
 
+    parser.add_argument(
+        "--hooks-module",
+        default=None,
+        help="Python module path for deployment customization hooks (default: scripts.deploy.deploy_customizations)",
+    )
+    parser.add_argument(
+        "--hooks-soft-fail",
+        action="store_true",
+        help="Do not abort deployment if a hook fails (default: fail on error)",
+    )
+
     args = parser.parse_args()
 
     if not az_logged_in():
@@ -489,6 +501,19 @@ def main() -> None:
         Path(args.env_file).expanduser().resolve() if args.env_file else (repo_root / ".env.deploy")
     )
 
+    # Initialize hooks
+    hooks = deploy_hooks.load_hooks(args.hooks_module)
+    # Context is a lighter object here; env will be fully populated later
+    ctx = deploy_hooks.DeployContext(
+        repo_root=repo_root,
+        env=dict(os.environ),
+        args=args,
+    )
+    
+    # Hook: pre_validate_env
+    # Opportunity to inject defaults into os.environ before files are loaded/validated
+    hooks.call("pre_validate_env", ctx)
+
     # Strict validation of provided dotenv files (if present).
     try:
         if runtime_env_path.exists():
@@ -540,6 +565,11 @@ def main() -> None:
             deploy_dotenv_specs = [spec for spec in DEPLOY_SCHEMA if EnvTarget.DOTENV_DEPLOY in spec.targets]
             validate_required(deploy_dotenv_specs, deploy_kv, context=f"deploy ({deploy_env_path.name} + env)")
             validate_cross_field_rules(deploy_kv=deploy_kv, context=f"deploy ({deploy_env_path.name} + env)")
+            
+            # Update context with fully populated env
+            ctx.env = dict(os.environ)
+            hooks.call("post_validate_env", ctx)
+
         except EnvValidationError as e:
             print(e.format(), file=sys.stderr)
             raise SystemExit(2)
@@ -1080,10 +1110,35 @@ def main() -> None:
 
     caddy_yaml_image = caddy_image
 
-    yaml_text = generate_deploy_yaml(
+    # Create DeployPlan for hooks
+    plan = deploy_hooks.DeployPlan(
         name=name,
         location=location,
-        image=image,
+        dns_label=dns_label,
+        app_image=image,
+        caddy_image=caddy_image,
+        other_image=other_image,
+        app_cpu=app_cpu_cores,
+        app_memory=app_memory_gb,
+        caddy_cpu=caddy_cpu_cores,
+        caddy_memory=caddy_memory_gb,
+        other_cpu=other_cpu_cores,
+        other_memory=other_memory_gb,
+        app_port=config_app_port,
+        public_domain=public_domain,
+    )
+
+    # Hook: build_deploy_plan
+    # Allow hooks to modify the plan (images, resources, etc)
+    hooks.call("build_deploy_plan", ctx, plan)
+
+    # Hook: pre_render_yaml
+    hooks.call("pre_render_yaml", ctx, plan)
+
+    yaml_text = generate_deploy_yaml(
+        name=plan.name,
+        location=plan.location,
+        image=plan.app_image,
         registry_server=registry_server,
         registry_username=registry_username,
         registry_password=registry_password,
@@ -1093,24 +1148,30 @@ def main() -> None:
         storage_name=storage_name,
         storage_key=storage_key,
         kv_name=kv_name,
-        dns_label=dns_label,
-        public_domain=public_domain,
+        dns_label=plan.dns_label,
+        public_domain=plan.public_domain,
         acme_email=acme_email,
         basic_auth_user=basic_auth_user,
         basic_auth_hash=basic_auth_hash,
-        app_cpu_cores=app_cpu_cores,
-        app_memory_gb=app_memory_gb,
+        app_cpu_cores=plan.app_cpu,
+        app_memory_gb=plan.app_memory,
         share_workspace=share_workspace,
         caddy_data_share_name=caddy_data_share,
         caddy_config_share_name=caddy_config_share,
-        caddy_image=caddy_yaml_image,
-        caddy_cpu_cores=caddy_cpu_cores,
-        caddy_memory_gb=caddy_memory_gb,
-        app_port=config_app_port,
-        other_image=other_image,
-        other_cpu_cores=other_cpu_cores,
-        other_memory_gb=other_memory_gb,
+        caddy_image=plan.caddy_image,
+        caddy_cpu_cores=plan.caddy_cpu,
+        caddy_memory_gb=plan.caddy_memory,
+        app_port=plan.app_port,
+        other_image=plan.other_image,
+        other_cpu_cores=plan.other_cpu,
+        other_memory_gb=plan.other_memory,
     )
+    
+    # Hook: post_render_yaml
+    # Allow hooks to patch the YAML string
+    patched_yaml = hooks.call("post_render_yaml", ctx, plan, yaml_text)
+    if patched_yaml:
+        yaml_text = patched_yaml
 
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
         f.write(yaml_text)
@@ -1118,12 +1179,18 @@ def main() -> None:
 
     print(f"📝 [deploy] wrote: {yaml_path}")
 
+    # Hook: pre_az_apply
+    hooks.call("pre_az_apply", ctx, plan, Path(yaml_path))
+
     # Retry container creation with exponential backoff for transient registry errors
     max_retries = 5
     base_delay = 10.0  # seconds
     for attempt in range(1, max_retries + 1):
         try:
-            run_az_command(["container", "create", "--resource-group", rg, "--file", yaml_path], capture_output=False)
+            res = run_az_command(["container", "create", "--resource-group", rg, "--file", yaml_path], capture_output=False)
+            
+            # Hook: post_deploy
+            hooks.call("post_deploy", ctx, plan, res)
             break  # Success
         except subprocess.CalledProcessError as e:
             err = getattr(e, "stderr", "") or ""
