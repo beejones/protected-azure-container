@@ -219,14 +219,7 @@ def generate_deploy_yaml(
                  break
          
          if insert_idx == -1:
-             # Fallback: insert at end of containers list if sidecar not found (unlikely)
-             # or just append? But volumes are at the end.
-             # We assume we are inside "containers:" block.
-             # Actually, if sidecar logic is unconditional in this function, we should find it.
-             # If not found, use a safe default or strict error? 
-             # Let's search for "volumeMounts:" of the FIRST container and insert after it closed? 
-             # No, easier: Generic insert before sidecar.
-             pass
+             raise ValueError("Could not find insertion point for 'other' container (expected '- name: tls-proxy').")
          else:
              other_block = [
                 indent(4, "- name: other"),

@@ -145,6 +145,28 @@ This repo uses a strict, schema-driven set of env keys.
 See env.example and env.deploy.example for the canonical keys.
 If you need to add a new key, follow: [docs/deploy/ENV_SCHEMA.md](docs/deploy/ENV_SCHEMA.md).
 
+## Migration Guide
+
+### Renamed Variables (Jan 2026)
+
+To support multiple containers, generic variable names have been updated:
+
+*   **`CONTAINER_IMAGE`** → **`APP_IMAGE`**
+*   **`DEFAULT_CPU_CORES`** → **`APP_CPU_CORES`**
+*   (CLI) `--cpu` → `--app-cpu` (old flag still works)
+*   (CLI) `--memory` → `--app-memory` (old flag still works)
+
+### New Sidecar/Other Variables
+
+*   `CADDY_IMAGE`, `CADDY_CPU_CORES`, `CADDY_MEMORY_GB`
+*   `OTHER_IMAGE`, `OTHER_CPU_CORES`, `OTHER_MEMORY_GB` (for generic third container)
+
+## Security Notes
+
+### `other` Container Volume Access
+
+If you deploy an `other` container (e.g., using `OTHER_IMAGE`), it shares the **same workspace volume** (`/home/coder/workspace`) as the main code-server container. This allows for convenient file sharing but implies that the `other` container has full read/write access to your code files. Ensure you trust the image used for the `other` container.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE)

@@ -344,13 +344,25 @@ def main() -> None:
         "--cpu",
         type=float,
         default=None,
-        help=f"App CPU cores (default: {VarsEnum.APP_CPU_CORES.value} from .env.deploy, fallback {DEFAULT_CPU_CORES})",
+        help=f"App CPU cores (deprecated, use --app-cpu). Default: {VarsEnum.APP_CPU_CORES.value} from .env.deploy, fallback {DEFAULT_CPU_CORES}",
+    )
+    parser.add_argument(
+        "--app-cpu",
+        type=float,
+        default=None,
+        help="App CPU cores",
     )
     parser.add_argument(
         "--memory",
         type=float,
         default=None,
-        help=f"App Memory GB (default: {VarsEnum.APP_MEMORY_GB.value} from .env.deploy, fallback {DEFAULT_MEMORY_GB})",
+        help=f"App Memory GB (deprecated, use --app-memory). Default: {VarsEnum.APP_MEMORY_GB.value} from .env.deploy, fallback {DEFAULT_MEMORY_GB})",
+    )
+    parser.add_argument(
+        "--app-memory",
+        type=float,
+        default=None,
+        help="App Memory GB",
     )
 
     # Prefer a stable mirror to avoid Docker Hub rate limiting in ACI.
@@ -1021,14 +1033,18 @@ def main() -> None:
             print(f"⚠️  [warn] Could not prefetch caddy image locally ({e}); continuing.", file=sys.stderr)
 
     app_cpu_cores = float(
-        args.cpu
-        if args.cpu is not None
-        else (os.getenv(VarsEnum.APP_CPU_CORES.value) or str(DEFAULT_CPU_CORES))
+        args.app_cpu
+        or args.cpu
+        or os.getenv(VarsEnum.APP_CPU_CORES.value)
+        or get_spec(DEPLOY_SCHEMA, VarsEnum.APP_CPU_CORES).default 
+        or str(DEFAULT_CPU_CORES)
     )
     app_memory_gb = float(
-        args.memory
-        if args.memory is not None
-        else (os.getenv(VarsEnum.APP_MEMORY_GB.value) or str(DEFAULT_MEMORY_GB))
+        args.app_memory
+        or args.memory
+        or os.getenv(VarsEnum.APP_MEMORY_GB.value)
+        or get_spec(DEPLOY_SCHEMA, VarsEnum.APP_MEMORY_GB).default 
+        or str(DEFAULT_MEMORY_GB)
     )
 
     caddy_cpu_cores = float(
