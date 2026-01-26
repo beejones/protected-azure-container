@@ -348,13 +348,13 @@ def main() -> None:
     parser.add_argument("--caddy-image", default=None)
     parser.add_argument(
         "--compose-app-service",
-        default="app",
-        help="Service name in docker-compose.yml for the application (default: app)",
+        default=None,
+        help="Service name in docker-compose.yml for the application (default: auto-detect)",
     )
     parser.add_argument(
         "--compose-caddy-service",
-        default="caddy",
-        help="Service name in docker-compose.yml for the caddy sidecar (default: caddy)",
+        default=None,
+        help="Service name in docker-compose.yml for the caddy sidecar (default: auto-detect)",
     )
 
     args = parser.parse_args()
@@ -370,7 +370,6 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
 
     # Load defaults from docker-compose.yml (Source of Truth)
-    # We perform this here so we can populate defaults before validating/resolving other args.
     config_app_port = 8080 # Fallback
     config_caddy_image = "caddy:2-alpine"
     config_docker_context = None
@@ -378,54 +377,68 @@ def main() -> None:
     try:
         # Use PyYAML-based helper which handles interpolation and doesn't require docker runtime.
         compose_config = compose_helpers.load_docker_compose_config(repo_root)
+        services = compose_config.get("services", {})
         
-        # User can customize which service mapped to 'app' or 'caddy'
-        app_service_name = args.compose_app_service
-        caddy_service_name = args.compose_caddy_service
-        
-        try:
-            app_service = compose_helpers.get_service_config(compose_config, app_service_name)
-            
-            # Docker context
-            config_docker_context = compose_helpers.get_build_context(app_service)
+        # Service Discovery via x-deploy-role (Concept: Explicit Contract)
+        detected_app_name = None
+        detected_caddy_name = None
 
-            # Determine app port
-            app_ports = compose_helpers.get_ports(app_service)
-            if app_ports:
-                 for p in app_ports:
-                    # Handle "HOST:CONTAINER" string format which PyYAML returns
-                    if isinstance(p, str): 
-                         if ":" in p:
-                             parts = p.split(":")
-                             # "8080:8080" -> 8080. We care about the Container port (right side)
-                             # actually for ACI we want to know what the app listens on.
-                             # If "80:8080", app listens on 8080.
-                             config_app_port = int(parts[-1])
-                         else:
-                             config_app_port = int(p)
-                         break
-                    elif isinstance(p, int):
-                        config_app_port = p
-                        break
-                    # dict format (long syntax) not fully supported by simple helper yet, 
-                    # but test passed with string list.
+        for name, svc in services.items():
+            role = compose_helpers.get_deploy_role(svc)
+            if role == "app":
+                detected_app_name = name
+            elif role == "sidecar":
+                detected_caddy_name = name
+
+        # 1. Resolve Sidecar Service
+        # CLI Argument > x-deploy-role > Auto-detect fallback (none)
+        caddy_service_name = args.compose_caddy_service or detected_caddy_name
+        
+        if caddy_service_name:
+            if caddy_service_name in services:
+                 caddy_service = services[caddy_service_name]
+                 config_caddy_image = compose_helpers.get_image(caddy_service) or "caddy:2-alpine"
             else:
-                 port_env = compose_helpers.get_env_var(app_service, "CODE_SERVER_PORT")
-                 if port_env:
-                     config_app_port = int(port_env)
-        
-        except ValueError:
-            # app service might be optional or named differently? 
-            # If default "app" is missing, we just log warn.
-            print(f"⚠️  [warn] Service '{app_service_name}' not found in docker-compose.yml", file=sys.stderr)
+                 print(f"⚠️  [warn] Targeted Caddy service '{caddy_service_name}' not found", file=sys.stderr)
 
-        try:
-            caddy_service = compose_helpers.get_service_config(compose_config, caddy_service_name)
-            config_caddy_image = compose_helpers.get_image(caddy_service) or "caddy:2-alpine"
-        except ValueError:
-             # caddy might be missing if user is just deploying single container?
-             # But our script assumes sidecar pattern.
-             pass
+        # 2. Resolve App Service
+        # CLI Argument > x-deploy-role > Auto-detect fallback (none)
+        app_service_name = args.compose_app_service or detected_app_name
+
+        if app_service_name:
+            if app_service_name in services:
+                # Log success if using auto-detected from role
+                if not args.compose_app_service and detected_app_name:
+                    print(f"ℹ️  [deploy] Detected services from x-deploy-role: app='{app_service_name}', sidecar='{caddy_service_name}'")
+
+                app_service = services[app_service_name]
+                
+                # Docker context
+                config_docker_context = compose_helpers.get_build_context(app_service)
+
+                # Determine app port
+                app_ports = compose_helpers.get_ports(app_service)
+                if app_ports:
+                     for p in app_ports:
+                        # Handle "HOST:CONTAINER" string format which PyYAML returns
+                        if isinstance(p, str): 
+                             if ":" in p:
+                                 parts = p.split(":")
+                                 config_app_port = int(parts[-1])
+                             else:
+                                 config_app_port = int(p)
+                             break
+                        elif isinstance(p, int):
+                            config_app_port = p
+                            break
+                else:
+                     port_env = compose_helpers.get_env_var(app_service, "CODE_SERVER_PORT")
+                     if port_env:
+                         config_app_port = int(port_env)
+            else:
+                 print(f"⚠️  [warn] Targeted App service '{app_service_name}' not found", file=sys.stderr)
+        else:
+             print("⚠️  [warn] Could not detect App service. Add 'x-deploy-role: app' to docker-compose.yml or use --compose-app-service.", file=sys.stderr)
 
     except Exception as e:
         print(f"⚠️  [warn] Failed to load docker-compose.yml defaults: {e}", file=sys.stderr)

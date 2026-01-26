@@ -98,3 +98,7 @@ def get_build_context(service_config: Dict[str, Any]) -> Optional[str]:
     if isinstance(build, dict):
         return build.get("context")
     return None
+
+def get_deploy_role(service_config: Dict[str, Any]) -> Optional[str]:
+    """Get the x-deploy-role value (e.g. 'app', 'sidecar')."""
+    return service_config.get("x-deploy-role")

@@ -84,3 +84,12 @@ def test_get_build_context(mock_compose_file):
     config = compose_helpers.load_docker_compose_config(mock_compose_file)
     app = compose_helpers.get_service_config(config, "app")
     assert compose_helpers.get_build_context(app) == "./app-context"
+
+def test_get_deploy_role(mock_compose_file):
+    # Mock file doesn't have x-deploy-role yet, let's inject it for this test or update fixture
+    # Updating fixture is cleaner, but let's just mock the dict for this specific function test
+    service_config = {"x-deploy-role": "app"}
+    assert compose_helpers.get_deploy_role(service_config) == "app"
+    
+    service_config = {"image": "foo"}
+    assert compose_helpers.get_deploy_role(service_config) is None
