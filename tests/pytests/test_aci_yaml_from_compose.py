@@ -49,9 +49,8 @@ def test_generate_yaml_with_command_and_ports():
     assert "name: WEB_PORT" in yaml_text
     assert "value: '8081'" in yaml_text
     
-    # Verify legacy fallback still present (optional but good for now)
-    assert "name: CODE_SERVER_PORT" in yaml_text
-    assert "value: '8080'" in yaml_text
+    # Verify legacy fallback is NOT present because WEB_PORT replaced it
+    assert "name: CODE_SERVER_PORT" not in yaml_text
 
 def test_generate_yaml_no_command_injects_nothing():
     yaml_text = yaml_helpers.generate_deploy_yaml(

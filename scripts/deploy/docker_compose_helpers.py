@@ -123,11 +123,8 @@ def normalize_command(command: Any) -> list[str]:
         return []
 
     # If interpolation is detected or complex shell chars, wrap in sh -lc
-    if "$" in cmd_str or ">" in cmd_str or "|" in cmd_str:
-        return ["sh", "-lc", cmd_str]
-    
-    # Otherwise simple space split
-    return cmd_str.split()
+    # Actually, to avoid splitting issues with quotes/paths, we prefer wrapping ALL string commands.
+    return ["sh", "-lc", cmd_str]
 
 
 def detect_services_by_role(compose_config: Dict[str, Any]) -> Dict[str, list[str]]:

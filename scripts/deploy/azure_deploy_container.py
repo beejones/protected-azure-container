@@ -440,13 +440,16 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             # Service Discovery via x-deploy-role (Concept: Explicit Contract)
             role_map = compose_helpers.detect_services_by_role(compose_config)
             
-            def get_single_role(role: str) -> Optional[str]:
+            def get_single_role(role: str, required: bool = False) -> Optional[str]:
                 found = role_map.get(role, [])
                 if len(found) > 1:
-                    print(f"⚠️  [warn] Multiple services found for role '{role}': {found}. Use --compose-{role}-service to disambiguate.", file=sys.stderr)
+                    msg = f"Multiple services found for role '{role}': {found}. Use --compose-{role}-service to disambiguate."
+                    if required:
+                        raise SystemExit(f"❌ [deploy] {msg}")
+                    print(f"⚠️  [warn] {msg}", file=sys.stderr)
                 return found[0] if found else None
 
-            detected_app_name = get_single_role("app")
+            detected_app_name = get_single_role("app", required=True)
             detected_caddy_name = get_single_role("sidecar")
             detected_ftp_name = get_single_role("ftp")
             

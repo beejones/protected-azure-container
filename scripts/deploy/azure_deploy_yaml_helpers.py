@@ -136,9 +136,9 @@ def generate_deploy_yaml(
         indent(12, f"value: 'https://{kv_name}.vault.azure.net/'"),
     ]
 
-    # Inject CODE_SERVER_PORT for legacy apps that expect it. 
-    # If app_port is set, we still inject it.
-    if app_port:
+    # Inject CODE_SERVER_PORT for legacy apps that expect it.
+    # Only if app_port is set AND we don't already have WEB_PORT (which is the new way)
+    if app_port and (not extra_env or "WEB_PORT" not in extra_env):
         lines += [
             indent(10, "- name: CODE_SERVER_PORT"),
             indent(12, f"value: '{app_port}'"),

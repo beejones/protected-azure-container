@@ -28,7 +28,7 @@ def test_detect_services_by_role_ambiguity():
     assert "web2" in role_map["app"]
 
 def test_normalize_command_string():
-    assert compose_helpers.normalize_command("python main.py") == ["python", "main.py"]
+    assert compose_helpers.normalize_command("python main.py") == ["sh", "-lc", "python main.py"]
     assert compose_helpers.normalize_command("python main.py --port ${PORT:-80}") == ["sh", "-lc", "python main.py --port ${PORT:-80}"]
     assert compose_helpers.normalize_command("echo hello > /tmp/out") == ["sh", "-lc", "echo hello > /tmp/out"]
 
