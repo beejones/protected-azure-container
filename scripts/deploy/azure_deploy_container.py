@@ -138,6 +138,7 @@ def generate_deploy_yaml(
     other_image: str | None = None,
     other_cpu_cores: float = 0.5,
     other_memory_gb: float = 0.5,
+    restart_policy: str = "Always",
 ) -> str:
     """Back-compat re-export for tests and external callers."""
 
@@ -175,6 +176,7 @@ def generate_deploy_yaml(
         other_image=other_image,
         other_cpu_cores=other_cpu_cores,
         other_memory_gb=other_memory_gb,
+        restart_policy=restart_policy,
     )
 
 
@@ -218,6 +220,16 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         "--basic-auth-password",
         default=None,
         help="Basic Auth password (used to compute bcrypt hash if --basic-auth-hash not provided)",
+    )
+
+    parser.add_argument(
+        "--restart-policy",
+        default=None,
+        choices=["Always", "OnFailure", "Never"],
+        help=(
+            "ACI container group restart policy. Default is Always. "
+            "For debugging CrashLoopBackOff, use Never so the container does not restart automatically."
+        ),
     )
     parser.add_argument(
         "--bcrypt-cost",
@@ -1208,6 +1220,13 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     
         # Hook: pre_render_yaml
         hooks.call("pre_render_yaml", ctx, plan)
+
+        restart_policy = (
+            str(getattr(args, "restart_policy", "") or "").strip()
+            or str(os.getenv("ACI_RESTART_POLICY", "") or "").strip()
+            or str(os.getenv("AZURE_RESTART_POLICY", "") or "").strip()
+            or "Always"
+        )
     
         yaml_text = generate_deploy_yaml(
             name=plan.name,
@@ -1243,6 +1262,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             other_image=plan.other_image,
             other_cpu_cores=plan.other_cpu,
             other_memory_gb=plan.other_memory,
+            restart_policy=restart_policy,
         )
     
         # Hook: post_render_yaml
