@@ -45,6 +45,7 @@ import deploy_hooks
 from env_schema import (
     DEPLOY_SCHEMA,
     RUNTIME_SCHEMA,
+    SECRETS_SCHEMA,
     EnvTarget,
     EnvValidationError,
     SecretsEnum,
@@ -369,6 +370,17 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     )
 
     parser.add_argument(
+        "--upload-secrets-file",
+        default=None,
+        help="Path to runtime secrets file to upload (default: repo root .env.secrets)",
+    )
+    parser.add_argument(
+        "--upload-secrets-secret-name",
+        default="env-secrets",
+        help="Key Vault secret name for runtime secrets (default: env-secrets)",
+    )
+
+    parser.add_argument(
         "--prefetch-images",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -595,13 +607,45 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     
         # Strict validation of provided dotenv files (if present).
         try:
+            # Runtime
             if runtime_env_path.exists():
                 runtime_kv = parse_dotenv_file(runtime_env_path)
-                validate_known_keys(RUNTIME_SCHEMA, runtime_kv, context=f"runtime ({runtime_env_path.name})")
+            else:
+                runtime_kv = {}
+
+            # Runtime Secrets
+            default_secrets_env = repo_root / ".env.secrets"
+            secrets_env_path = Path(args.upload_secrets_file).resolve() if args.upload_secrets_file else default_secrets_env
+            if secrets_env_path.exists():
+                secrets_kv = parse_dotenv_file(secrets_env_path)
+                runtime_kv.update(secrets_kv)
+
+            if runtime_kv:
+                # Validate merged runtime config
+                validate_known_keys(
+                    RUNTIME_SCHEMA + SECRETS_SCHEMA, 
+                    runtime_kv, 
+                    context=f"runtime ({runtime_env_path.name} + {secrets_env_path.name})"
+                )
     
+            # Deploy
             if deploy_env_path.exists():
                 deploy_kv_file = parse_dotenv_file(deploy_env_path)
-                validate_known_keys(DEPLOY_SCHEMA, deploy_kv_file, context=f"deploy ({deploy_env_path.name})")
+            else:
+                deploy_kv_file = {}
+
+            # Deploy Secrets
+            deploy_secrets_env = repo_root / ".env.deploy.secrets"
+            if deploy_secrets_env.exists():
+                deploy_secrets_kv = parse_dotenv_file(deploy_secrets_env)
+                deploy_kv_file.update(deploy_secrets_kv)
+
+            if deploy_kv_file:
+                validate_known_keys(
+                    DEPLOY_SCHEMA, 
+                    deploy_kv_file, 
+                    context=f"deploy ({deploy_env_path.name} + {deploy_secrets_env.name})"
+                )
         except EnvValidationError as e:
             print(e.format(), file=sys.stderr)
             raise SystemExit(2)
@@ -610,8 +654,12 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         # override=True ensures deploy-time vars take precedence over runtime vars.
         if runtime_env_path.exists():
             load_dotenv(dotenv_path=str(runtime_env_path), override=False)
+        if secrets_env_path.exists():
+            load_dotenv(dotenv_path=str(secrets_env_path), override=True)
         if deploy_env_path.exists():
             load_dotenv(dotenv_path=str(deploy_env_path), override=True)
+        if deploy_secrets_env.exists():
+            load_dotenv(dotenv_path=str(deploy_secrets_env), override=True)
         elif not runtime_env_path.exists():
             # If neither exists, materialize .env.deploy if we have env vars (CI case)
             materialize_deploy_env_file_if_missing(path=deploy_env_path)
@@ -628,12 +676,23 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             try:
                 if runtime_env_path.exists():
                     runtime_kv = parse_dotenv_file(runtime_env_path)
-                    runtime_kv = apply_defaults(RUNTIME_SCHEMA, runtime_kv)
-                    validate_required(RUNTIME_SCHEMA, runtime_kv, context=f"runtime ({runtime_env_path.name})")
-    
-                deploy_kv_file = parse_dotenv_file(deploy_env_path) if deploy_env_path.exists() else {}
+
+                if secrets_env_path.exists():
+                    runtime_kv.update(parse_dotenv_file(secrets_env_path))
+
+                runtime_kv = apply_defaults(RUNTIME_SCHEMA, runtime_kv)
+                runtime_kv = apply_defaults(SECRETS_SCHEMA, runtime_kv)
+                validate_required(RUNTIME_SCHEMA + SECRETS_SCHEMA, runtime_kv, context=f"runtime ({runtime_env_path.name} + {secrets_env_path.name})")
+
+                deploy_kv_file = {}
+                if deploy_env_path.exists():
+                    deploy_kv_file.update(parse_dotenv_file(deploy_env_path))
+                if deploy_secrets_env.exists():
+                    deploy_kv_file.update(parse_dotenv_file(deploy_secrets_env))
+
                 deploy_schema_keys = {spec.key.value for spec in DEPLOY_SCHEMA}
                 deploy_kv_env = {k: v for k, v in os.environ.items() if k in deploy_schema_keys and str(v).strip()}
+                
                 deploy_kv = dict(deploy_kv_file)
                 deploy_kv.update(deploy_kv_env)
                 deploy_kv = apply_defaults(DEPLOY_SCHEMA, deploy_kv)
@@ -817,6 +876,21 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             except subprocess.CalledProcessError as e:
                 print(_format_keyvault_set_help(vault_name=kv_name, stderr=getattr(e, "stderr", None)), file=sys.stderr)
                 raise SystemExit(1)
+
+            # Upload runtime secrets (if any)
+            if secrets_env_path.exists():
+                print(f"Uploading secrets from {secrets_env_path} ...")
+                # Secrets are uploaded raw (no filtering needed as the file itself is the filter)
+                secrets_content = secrets_env_path.read_text()
+                try:
+                    kv_secret_set_quiet(vault_name=kv_name, secret_name=str(args.upload_secrets_secret_name), value=secrets_content)
+                except subprocess.CalledProcessError as e:
+                    print(_format_keyvault_set_help(vault_name=kv_name, stderr=getattr(e, "stderr", None)), file=sys.stderr)
+                    raise SystemExit(1)
+            else:
+                 # Warn if we *expected* secrets but didn't find them?
+                 # For now, silent skip is okay, OR we can warn if SECRETS_SCHEMA requires keys.
+                 pass
 
         kv_name_for_secrets = ""
         if persist_to_kv:

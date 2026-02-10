@@ -12,14 +12,15 @@ A world-class protected container setup featuring:
 ```bash
 # Copy example environment files
 cp env.example .env
+cp env.secrets.example .env.secrets
 cp env.deploy.example .env.deploy
+cp env.deploy.secrets.example .env.deploy.secrets
 
 # Generate a Basic Auth password hash
 docker run --rm caddy:2-alpine caddy hash-password --plaintext 'your-password'
 
-# Add the hash to .env
-echo 'BASIC_AUTH_USER=admin' >> .env
-echo 'BASIC_AUTH_HASH=<paste-hash-here>' >> .env
+# Add the hash to .env.secrets
+echo 'BASIC_AUTH_HASH=<paste-hash-here>' >> .env.secrets
 
 # Start the containers
 docker compose up --build
@@ -211,9 +212,12 @@ When you need to add new configuration keys, follow the schema guide: [docs/depl
 
 This repo uses a strict, schema-driven set of env keys.
 
-- Runtime config lives in `.env` (and is uploaded to Key Vault as a single secret).
-- Deploy-time config lives in `.env.deploy`.
-- Deployment reads `.env` first, then `.env.deploy` on top (deploy-time overrides).
+- **Runtime Config**: `.env` (non-secret settings)
+- **Runtime Secrets**: `.env.secrets` (sensitive keys, uploaded to Key Vault as `env-secrets`)
+- **Deploy Config**: `.env.deploy` (deployment settings, e.g. Azure location)
+- **Deploy Secrets**: `.env.deploy.secrets` (deployment credentials, e.g. GHCR token)
+
+Deployment loads and merges these files (deploy values override runtime values, secrets override non-secrets).
 
 See env.example and env.deploy.example for the canonical keys.
 If you need to add a new key, follow: [docs/deploy/ENV_SCHEMA.md](docs/deploy/ENV_SCHEMA.md).

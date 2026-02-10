@@ -37,6 +37,7 @@ from dotenv import dotenv_values
 from env_schema import (
     DEPLOY_SCHEMA,
     RUNTIME_SCHEMA,
+    SECRETS_SCHEMA,
     EnvTarget,
     EnvValidationError,
     SecretsEnum,
@@ -305,7 +306,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=None, help="GitHub repo in owner/repo form (default: current)")
     ap.add_argument("--deploy-env", default=".env.deploy", help="Path to deploy env file (default: .env.deploy)")
+    ap.add_argument("--deploy-secrets-env", default=".env.deploy.secrets", help="Path to deploy secrets file (default: .env.deploy.secrets)")
     ap.add_argument("--runtime-env", default=".env", help="Path to runtime env file (default: .env)")
+    ap.add_argument("--secrets-env", default=".env.secrets", help="Path to runtime secrets file (default: .env.secrets)")
     ap.add_argument(
         "--set",
         action=argparse.BooleanOptionalAction,
@@ -384,22 +387,34 @@ def main() -> None:
         print("[dry-run] Re-run with: python3 scripts/deploy/gh_sync_actions_env.py --set")
 
     deploy_path = Path(args.deploy_env).expanduser().resolve()
+    deploy_secrets_path = Path(args.deploy_secrets_env).expanduser().resolve()
     runtime_path = Path(args.runtime_env).expanduser().resolve()
+    secrets_path = Path(args.secrets_env).expanduser().resolve()
 
     deploy_text = _read_text(deploy_path)
     runtime_text = _read_text(runtime_path)
+    # Secrets files are optional-ish (validation handles missing), but if we're syncing them, read them.
+    # We'll read them safely.
+    secrets_text = secrets_path.read_text(encoding="utf-8") if secrets_path.exists() else ""
+    deploy_secrets_text = deploy_secrets_path.read_text(encoding="utf-8") if deploy_secrets_path.exists() else ""
 
     # Strict validation of dotenv inputs (no unknown keys, no legacy aliases).
     try:
-        deploy_kv = parse_dotenv_file(deploy_path)
-        runtime_kv = parse_dotenv_file(runtime_path)
+        deploy_kv = parse_dotenv_file(deploy_path) if deploy_path.exists() else {}
+        if deploy_secrets_path.exists():
+            deploy_kv.update(parse_dotenv_file(deploy_secrets_path))
+            
+        runtime_kv = parse_dotenv_file(runtime_path) if runtime_path.exists() else {}
+        if secrets_path.exists():
+            runtime_kv.update(parse_dotenv_file(secrets_path))
 
-        validate_known_keys(DEPLOY_SCHEMA, deploy_kv, context="deploy (.env.deploy)")
-        validate_known_keys(RUNTIME_SCHEMA, runtime_kv, context="runtime (.env)")
+        validate_known_keys(DEPLOY_SCHEMA, deploy_kv, context=f"deploy ({deploy_path.name} + {deploy_secrets_path.name})")
+        validate_known_keys(RUNTIME_SCHEMA + SECRETS_SCHEMA, runtime_kv, context=f"runtime ({runtime_path.name} + {secrets_path.name})")
 
         # Apply defaults and validate required keys for the dotenv portions.
         runtime_kv = apply_defaults(RUNTIME_SCHEMA, runtime_kv)
-        validate_required(RUNTIME_SCHEMA, runtime_kv, context="runtime (.env)")
+        runtime_kv = apply_defaults(SECRETS_SCHEMA, runtime_kv)
+        validate_required(RUNTIME_SCHEMA + SECRETS_SCHEMA, runtime_kv, context=f"runtime ({runtime_path.name} + {secrets_path.name})")
 
         # Allow deploy-script-derived values (e.g. AZURE_OIDC_APP_NAME) to satisfy schema validation
         # when this script is invoked as a subprocess from azure_deploy_container.py.
@@ -408,10 +423,10 @@ def main() -> None:
         deploy_kv.update(deploy_kv_env)
 
         deploy_kv = apply_defaults(DEPLOY_SCHEMA, deploy_kv)
-        # Only require keys that belong to deploy dotenv.
-        deploy_dotenv_specs = [spec for spec in DEPLOY_SCHEMA if EnvTarget.DOTENV_DEPLOY in spec.targets]
-        validate_required(deploy_dotenv_specs, deploy_kv, context="deploy (.env.deploy)")
-        validate_cross_field_rules(deploy_kv=deploy_kv, context="deploy (.env.deploy)")
+        # Only require keys that belong to deploy dotenvs.
+        deploy_dotenv_specs = [spec for spec in DEPLOY_SCHEMA if {EnvTarget.DOTENV_DEPLOY, EnvTarget.DOTENV_DEPLOY_SECRETS}.intersection(spec.targets)]
+        validate_required(deploy_dotenv_specs, deploy_kv, context=f"deploy ({deploy_path.name} + {deploy_secrets_path.name})")
+        validate_cross_field_rules(deploy_kv=deploy_kv, context=f"deploy ({deploy_path.name} + {deploy_secrets_path.name})")
     except EnvValidationError as e:
         raise SystemExit(e.format())
 
@@ -495,9 +510,11 @@ def main() -> None:
 
     # 1) Always store runtime dotenv as a secret.
     synced_count += set_sec_wrapper(repo, SecretsEnum.RUNTIME_ENV_DOTENV.value, runtime_text, dry_run)
+    # 1.5) Store runtime secrets dotenv as a secret.
+    synced_count += set_sec_wrapper(repo, SecretsEnum.RUNTIME_SECRETS_DOTENV.value, secrets_text, dry_run)
 
     # 1b) Also sync specific runtime keys needed by the workflow directly.
-    for spec in RUNTIME_SCHEMA:
+    for spec in RUNTIME_SCHEMA + SECRETS_SCHEMA:
         val = str(runtime_kv.get(spec.key.value) or "").strip()
         if not val:
             continue

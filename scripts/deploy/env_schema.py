@@ -23,7 +23,9 @@ from dotenv import dotenv_values
 
 class EnvTarget(str, Enum):
     DOTENV_RUNTIME = "dotenv_runtime"  # `.env`
+    DOTENV_SECRETS = "dotenv_secrets"  # `.env.secrets`
     DOTENV_DEPLOY = "dotenv_deploy"  # `.env.deploy`
+    DOTENV_DEPLOY_SECRETS = "dotenv_deploy_secrets"  # `.env.deploy.secrets`
     GH_ACTIONS_VAR = "gh_actions_var"  # GitHub Actions variable
     GH_ACTIONS_SECRET = "gh_actions_secret"  # GitHub Actions secret
     KEYVAULT_SECRET = "keyvault_secret"  # Azure Key Vault secret
@@ -31,6 +33,7 @@ class EnvTarget(str, Enum):
 
 class KeyVaultSecretName(str, Enum):
     ENV = "env"  # stores full runtime `.env` content
+    ENV_SECRETS = "env-secrets"  # stores full runtime `.env.secrets` content
 
 
 class VarsEnum(str, Enum):
@@ -90,6 +93,7 @@ class SecretsEnum(str, Enum):
 
     # GitHub Actions meta-secret (not a container env var, but required by CI wiring)
     RUNTIME_ENV_DOTENV = "RUNTIME_ENV_DOTENV"
+    RUNTIME_SECRETS_DOTENV = "RUNTIME_SECRETS_DOTENV"
 
 
 @dataclass(frozen=True)
@@ -121,16 +125,20 @@ RUNTIME_SCHEMA: tuple[EnvKeySpec, ...] = (
         default="admin",
         targets=frozenset({EnvTarget.DOTENV_RUNTIME, EnvTarget.GH_ACTIONS_VAR}),
     ),
+)
+
+
+SECRETS_SCHEMA: tuple[EnvKeySpec, ...] = (
     EnvKeySpec(
         key=SecretsEnum.BASIC_AUTH_HASH,
         mandatory=True,
-        targets=frozenset({EnvTarget.DOTENV_RUNTIME, EnvTarget.GH_ACTIONS_SECRET}),
+        targets=frozenset({EnvTarget.DOTENV_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
     ),
     EnvKeySpec(
         key=SecretsEnum.APP_SECRET,
         mandatory=False,
         default=None,
-        targets=frozenset({EnvTarget.DOTENV_RUNTIME}),
+        targets=frozenset({EnvTarget.DOTENV_SECRETS}),
     ),
 )
 
@@ -218,7 +226,7 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
         key=SecretsEnum.GHCR_TOKEN,
         mandatory=False,
         default=None,
-        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_SECRET}),
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
     ),
     EnvKeySpec(
         key=VarsEnum.APP_CPU_CORES,
@@ -289,11 +297,16 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
     EnvKeySpec(
         key=SecretsEnum.BASIC_AUTH_HASH,
         mandatory=False,
-        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_SECRET}),
+        targets=frozenset({EnvTarget.GH_ACTIONS_SECRET}),
     ),
     # GitHub Actions expects this secret to exist to materialize `.env` in CI.
     EnvKeySpec(
         key=SecretsEnum.RUNTIME_ENV_DOTENV,
+        mandatory=True,
+        targets=frozenset({EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.RUNTIME_SECRETS_DOTENV,
         mandatory=True,
         targets=frozenset({EnvTarget.GH_ACTIONS_SECRET}),
     ),
