@@ -26,6 +26,16 @@ if [ -n "$AZURE_KEYVAULT_URI" ]; then
     else
         echo "[azure_start] Warning: Could not fetch 'env' secret from Key Vault"
     fi
+
+    # Fetch the 'env-secrets' secret and write to .env.secrets
+    if az keyvault secret show --vault-name "$VAULT_NAME" --name "env-secrets" --query "value" -o tsv > /home/coder/.env.secrets 2>/dev/null; then
+        echo "[azure_start] Successfully fetched .env.secrets from Key Vault"
+        chown coder:coder /home/coder/.env.secrets
+        chmod 600 /home/coder/.env.secrets
+        export $(grep -v '^#' /home/coder/.env.secrets | xargs -d '\n')
+    else
+        echo "[azure_start] Warning: Could not fetch 'env-secrets' secret from Key Vault"
+    fi
 else
     echo "[azure_start] No AZURE_KEYVAULT_URI set, using local environment"
     
