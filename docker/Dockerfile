@@ -33,6 +33,10 @@ USER root
 COPY azure_start.sh /usr/local/bin/azure_start.sh
 RUN chmod +x /usr/local/bin/azure_start.sh
 
+# Copy Ubuntu startup script (no Azure CLI/Key Vault usage)
+COPY ubuntu_start.sh /usr/local/bin/ubuntu_start.sh
+RUN chmod +x /usr/local/bin/ubuntu_start.sh
+
 EXPOSE 8080
 
 # Environment defaults

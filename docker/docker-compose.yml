@@ -3,7 +3,7 @@ services:
   app:
     x-deploy-role: app
     build:
-      context: ./docker
+      context: .
       dockerfile: Dockerfile
     container_name: protected-container
     restart: unless-stopped
@@ -14,9 +14,9 @@ services:
       AZURE_KEYVAULT_URI: ${AZURE_KEYVAULT_URI:-}
     volumes:
       # Workspace persistence
-      - ./workspace:/home/coder/workspace
+      - ../workspace:/home/coder/workspace
       # Local .env for development (production uses Key Vault)
-      - ./.env:/home/coder/.env:ro
+      - ../.env:/home/coder/.env:ro
     expose:
       - "8080"
     networks:
@@ -39,7 +39,7 @@ services:
       BASIC_AUTH_USER: ${BASIC_AUTH_USER:-admin}
       BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:-}
     volumes:
-      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

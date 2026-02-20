@@ -1,8 +1,7 @@
 # Ubuntu Server Deployment Target — protected-container (upstream)
 
-This plan covers the work to be done in this repo (`protected-container`, to be renamed
-`protected-container`) to support Ubuntu server as a first-class deployment target alongside
-Azure ACI.
+This plan covers the work in this repo (`protected-container`) to support Ubuntu server as a
+first-class deployment target alongside Azure ACI.
 
 Stock-dashboard-specific work is tracked separately in
 `stock-dashboard/planning/UBUNTU_SERVER_DEPLOYMENT.md`.
@@ -11,12 +10,12 @@ Stock-dashboard-specific work is tracked separately in
 
 ## Task Checklist
 
-- [ ] **Phase 0** — Rename repo & review existing docs
-- [ ] **Phase 1** — `ubuntu_start.sh` plain entrypoint
-- [ ] **Phase 2** — `ubuntu_deploy.py` SSH deploy engine script
-- [ ] **Phase 3** — Generic `build_push.sh` local build+push helper
-- [ ] **Phase 4** — Multi-app Caddy routing (Caddyfile template)
-- [ ] **Phase 5** — Documentation (`docs/deploy/UBUNTU_SERVER.md`)
+- [x] **Phase 0** — Rename repo & review existing docs
+- [x] **Phase 1** — `ubuntu_start.sh` plain entrypoint
+- [x] **Phase 2** — `ubuntu_deploy.py` SSH deploy engine script
+- [x] **Phase 3** — Generic `build_push.sh` local build+push helper
+- [x] **Phase 4** — Multi-app Caddy routing (Caddyfile template)
+- [x] **Phase 5** — Documentation (`docs/deploy/UBUNTU_SERVER.md`)
 - [ ] **Phase 6** — Verification
 
 ---
@@ -25,7 +24,7 @@ Stock-dashboard-specific work is tracked separately in
 
 ### Rename
 
-Rename `protected-container` → `protected-container` on GitHub
+Rename `protected-azure-container` → `protected-container` on GitHub
 (`Settings → General → Repository name`).
 
 GitHub automatically redirects the old URL. Existing submodule references continue to work,
@@ -45,7 +44,7 @@ Update all internal references:
 - Read through `docs/deploy/AZURE_CONTAINER.md`, `COMPOSE_CONTRACT.md`, `HOOKS.md` for
   accuracy and anything that mentions "azure" where it should be target-agnostic.
 - Check for obsolete planning files in `planning/`.
-- Ensure `docker-compose.yml` comments are still correct.
+- Ensure `docker/docker-compose.yml` comments are still correct.
 
 **Exit criteria:** Repo renamed; GitHub redirect working; no stale doc contradictions;
 all internal references updated.
@@ -99,7 +98,7 @@ vars correctly; gracefully skips missing files.
 **File:** `scripts/deploy/ubuntu_deploy.py`
 
 The Ubuntu-target parallel to `azure_deploy_container.py`. Reads the repo's
-`docker-compose.yml` (same `x-deploy-role` contract) and deploys via SSH.
+`docker/docker-compose.yml` (same `x-deploy-role` contract) and deploys via SSH.
 
 Steps performed:
 1. Parse args: `--host`, `--remote-dir`, `--compose-files`, `--sync-secrets`.
@@ -163,7 +162,7 @@ image; image is visible in the registry.
 ## Phase 4 — Multi-App Caddy Routing (Caddyfile Template)
 
 When multiple stacks run on the same Ubuntu server, each needs its own subdomain routed
-to its internal port. Update the `docker/caddy/Caddyfile` template to support this pattern.
+to its internal port. Update the `docker/Caddyfile` template to support this pattern.
 
 **Option A — One Caddy per stack (current default):**
 Each stack runs its own Caddy. Works out of the box but requires unique host ports per stack
@@ -188,6 +187,10 @@ trader.example.com {
 
 Document both options in Phase 5. The compose template stays as-is (Option A default);
 Option B is documented as a multi-app override pattern.
+
+Implemented:
+- `docker/docker-compose.shared-caddy.yml` override (disable per-stack caddy via profile + join external `caddy` network)
+- `docker/Caddyfile.multiapp.example` for a shared Caddy instance
 
 **Exit criteria:** Two stacks reachable simultaneously at distinct subdomains over HTTPS;
 TLS auto-provisioned by Caddy for both hostnames.
@@ -219,19 +222,19 @@ have the app running.
 ## Phase 6 — Verification
 
 ### Automated
-- `docker compose -f docker-compose.yml -f docker/docker-compose.ubuntu.yml config` exits 0.
-- Existing test suite passes unchanged.
+- [x] `docker compose -f docker/docker-compose.yml -f docker/docker-compose.ubuntu.yml config` exits 0.
+- [x] Existing test suite passes (`pytest`)
 
 ### Manual
 
-| Check | Expected |
-|---|---|
-| `ubuntu_start.sh` sources `.env` | Env vars visible in running container |
-| `ubuntu_start.sh` missing files | Graceful skip, no crash |
-| `ubuntu_deploy.py --host user@server` | All containers `running` |
-| `build_push.sh` | Image appears in GHCR with correct tag |
-| Portainer webhook triggered | Stack redeploys with new image |
-| Two stacks on same server | Each reachable at its own subdomain via HTTPS |
-| Server reboot | All containers back up automatically (`systemctl is-enabled docker` = enabled) |
+Note: The remaining unchecked items require a real Ubuntu server (SSH access), a reachable registry (for pushes/pulls), and optionally Portainer + DNS.
+
+- [x] `ubuntu_start.sh` sources `.env` (local compose smoke test)
+- [x] `ubuntu_start.sh` missing files (local compose smoke test)
+- [ ] `ubuntu_deploy.py --host user@server` (requires real Ubuntu host via SSH)
+- [ ] `build_push.sh` (requires registry creds and push permission)
+- [ ] Portainer webhook triggered (requires Portainer running on server)
+- [ ] Two stacks on same server (requires DNS + shared Caddy setup)
+- [ ] Server reboot recovery (requires systemd + actual reboot)
 
 **Exit criteria:** All checks pass on a fresh Ubuntu 24.04 LTS server.

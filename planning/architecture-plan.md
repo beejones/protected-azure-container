@@ -71,7 +71,7 @@ Update supervisord if still needed to run code-server.
 
 ---
 
-#### [MODIFY] [docker-compose.yml](file:///home/ronny/dev/protected-container/docker-compose.yml)
+#### [MODIFY] docker/docker-compose.yml
 
 Add Caddy sidecar service and update networking:
 CODE_SERVER_PASSWORD will be fetched from Key Vault in production, from .env in development. Keyvault will have an env secret which is downloaded and store in the .env file.
@@ -91,7 +91,7 @@ services:
       # Key Vault integration
       AZURE_KEYVAULT_URI: ${AZURE_KEYVAULT_URI}
     volumes:
-      - ./workspace:/home/coder/workspace
+      - ../workspace:/home/coder/workspace
       - state:/app/.state
       - logs:/app/logs
     expose:

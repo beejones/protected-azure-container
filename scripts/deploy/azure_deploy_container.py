@@ -146,6 +146,7 @@ def generate_deploy_yaml(
     other_cpu_cores: float = 0.5,
     other_memory_gb: float = 0.5,
     restart_policy: str = "OnFailure",
+    include_caddy: bool = True,
 ) -> str:
     """Back-compat re-export for tests and external callers."""
 
@@ -184,6 +185,7 @@ def generate_deploy_yaml(
         other_cpu_cores=other_cpu_cores,
         other_memory_gb=other_memory_gb,
         restart_policy=restart_policy,
+        include_caddy=include_caddy,
     )
 
 
@@ -208,7 +210,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         default=None,
         help=(
             "Azure Files share name to mount at /data for the app container. "
-            "If omitted, the deploy script will mount --share-workspace at /data when docker-compose.yml indicates the app uses /data."
+            "If omitted, the deploy script will mount --share-workspace at /data when docker/docker-compose.yml indicates the app uses /data."
         ),
     )
     parser.add_argument("--caddy-data-share-name", default=None)
@@ -419,12 +421,24 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     parser.add_argument(
         "--compose-app-service",
         default=None,
-        help="Service name in docker-compose.yml for the app (default: auto-detect via x-deploy-role)",
+        help="Service name in docker/docker-compose.yml for the app (default: auto-detect via x-deploy-role)",
     )
     parser.add_argument(
         "--compose-caddy-service",
         default=None,
-        help="Service name in docker-compose.yml for the caddy sidecar (default: auto-detect via x-deploy-role)",
+        help="Service name in docker/docker-compose.yml for the caddy sidecar (default: auto-detect via x-deploy-role)",
+    )
+
+    parser.add_argument(
+        "--service",
+        default="full",
+        choices=["web", "web-caddy", "full"],
+        help=(
+            "Deployment mode. "
+            "'full' is the backward-compatible default (currently behaves like 'web-caddy'). "
+            "'web-caddy' deploys the app behind Caddy. "
+            "'web' deploys the app container only (debugging)."
+        ),
     )
 
     parser.add_argument(
@@ -467,23 +481,37 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         if args.azure_oidc_app_name and str(args.azure_oidc_app_name).strip():
             os.environ[VarsEnum.AZURE_OIDC_APP_NAME.value] = str(args.azure_oidc_app_name).strip()
     
-        # Load defaults from docker-compose.yml (Source of Truth)
+        # Load defaults from docker/docker-compose.yml (Source of Truth)
         config_app_port = 8080 # Fallback
         config_caddy_image = "caddy:2-alpine"
         config_docker_context = None
+        compose_dir = repo_root
     
         try:
             # Use PyYAML-based helper which handles interpolation and doesn't require docker runtime.
             compose_config = compose_helpers.load_docker_compose_config(repo_root)
+            compose_dir_raw = compose_config.get("_compose_dir") if isinstance(compose_config, dict) else None
+            if compose_dir_raw:
+                try:
+                    compose_dir = Path(str(compose_dir_raw)).resolve()
+                except Exception:
+                    compose_dir = repo_root
             services = compose_config.get("services", {})
     
             # Service Discovery via x-deploy-role (Concept: Explicit Contract)
             role_map = compose_helpers.detect_services_by_role(compose_config)
             
+            role_flag_hint = {
+                "app": "--compose-app-service",
+                "sidecar": "--compose-caddy-service",
+            }
+
             def get_single_role(role: str, required: bool = False) -> Optional[str]:
                 found = role_map.get(role, [])
                 if len(found) > 1:
-                    msg = f"Multiple services found for role '{role}': {found}. Use --compose-{role}-service to disambiguate."
+                    hint = role_flag_hint.get(role)
+                    suffix = f" Use {hint} to disambiguate." if hint else ""
+                    msg = f"Multiple services found for role '{role}': {found}.{suffix}"
                     if required:
                         raise SystemExit(f"❌ [deploy] {msg}")
                     print(f"⚠️  [warn] {msg}", file=sys.stderr)
@@ -491,16 +519,15 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
             detected_app_name = get_single_role("app", required=True)
             detected_caddy_name = get_single_role("sidecar")
-            detected_ftp_name = get_single_role("ftp")
             
             # fallback for older versions or simple cases
             all_named_roles = [n for names in role_map.values() for n in names]
             detected_other_name = next((n for n in services if n not in all_named_roles), None)
     
         except Exception as e:
-            print(f"⚠️  [warn] Failed to load docker-compose.yml defaults: {e}", file=sys.stderr)
+            print(f"⚠️  [warn] Failed to load docker/docker-compose.yml defaults: {e}", file=sys.stderr)
             services = {}
-            detected_app_name = detected_caddy_name = detected_other_name = detected_ftp_name = None
+            detected_app_name = detected_caddy_name = detected_other_name = None
     
         # CLI Argument > x-deploy-role > Auto-detect fallback (none)
         caddy_service_name = args.compose_caddy_service or detected_caddy_name
@@ -531,7 +558,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 # Docker context: Resolve relative to repo_root
                 raw_context = compose_helpers.get_build_context(app_service)
                 if raw_context:
-                    config_docker_context = str((repo_root / raw_context).resolve())
+                    config_docker_context = str((compose_dir / raw_context).resolve())
     
                 # Determine app command and ports
                 # Determine app command
@@ -588,7 +615,9 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             else:
                 print(f"⚠️  [warn] Targeted App service '{app_service_name}' not found", file=sys.stderr)
         else:
-            print("⚠️  [warn] Could not detect App service. Add 'x-deploy-role: app' to docker-compose.yml or use --compose-app-service.", file=sys.stderr)
+            print("⚠️  [warn] Could not detect App service. Add 'x-deploy-role: app' to docker/docker-compose.yml or use --compose-app-service.", file=sys.stderr)
+
+        deploy_mode = str(getattr(args, "service", "full") or "full").strip()
     
     
         interactive = is_interactive() if args.interactive is None else bool(args.interactive)
@@ -1284,7 +1313,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             name=name,
             location=location,
             dns_label=dns_label,
-            deploy_mode="full",
+            deploy_mode=deploy_mode,
             compose_service_name=app_service_name or "app",
             deploy_role="app",
             app_image=image,
@@ -1352,6 +1381,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             other_cpu_cores=plan.other_cpu,
             other_memory_gb=plan.other_memory,
             restart_policy=restart_policy,
+            include_caddy=(deploy_mode in {"web-caddy", "full"}),
         )
     
         # Hook: post_render_yaml
@@ -1396,7 +1426,10 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
         print("\n[done] Deployed.")
         print(f"  FQDN: {dns_label}.{location}.azurecontainer.io")
-        print(f"  https://{public_domain}/  (VS Code)")
+        if deploy_mode in {"web-caddy", "full"}:
+            print(f"  https://{public_domain}/")
+        else:
+            print(f"  http://{dns_label}.{location}.azurecontainer.io:{plan.app_port}/")
     except SystemExit:
         # Re-raise SystemExits (usually from validation or argparse)
         raise

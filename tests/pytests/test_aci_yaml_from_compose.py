@@ -95,3 +95,41 @@ def test_generate_yaml_no_command_injects_nothing():
     # We split by the next container's name to isolate the first one
     app_container_yaml = yaml_text.split("- name: tls-proxy")[0]
     assert "command:" not in app_container_yaml
+
+
+def test_generate_yaml_web_only_exposes_app_port_and_no_tls_proxy():
+    yaml_text = yaml_helpers.generate_deploy_yaml(
+        name="test-web-only",
+        location="eastus",
+        image="myrepo/myapp:latest",
+        registry_server=None,
+        registry_username=None,
+        registry_password=None,
+        identity_id="id123",
+        identity_client_id=None,
+        identity_tenant_id=None,
+        storage_name="mystore",
+        storage_key="mykey",
+        kv_name="mykv",
+        dns_label="myapp",
+        public_domain="myapp.com",
+        acme_email="admin@myapp.com",
+        basic_auth_user="admin",
+        basic_auth_hash="hash",
+        app_cpu_cores=1.0,
+        app_memory_gb=1.5,
+        share_workspace="workspace",
+        caddy_data_share_name="caddy-data",
+        caddy_config_share_name="caddy-config",
+        caddy_image="caddy:latest",
+        caddy_cpu_cores=0.5,
+        caddy_memory_gb=0.5,
+        app_port=8080,
+        include_caddy=False,
+    )
+
+    assert "- name: tls-proxy" not in yaml_text
+    assert "dnsNameLabel: myapp" in yaml_text
+    # App port should be publicly exposed in ipAddress ports when caddy is disabled.
+    assert "ipAddress:" in yaml_text
+    assert "- port: 8080" in yaml_text

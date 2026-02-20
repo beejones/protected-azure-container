@@ -9,7 +9,7 @@ This repository establishes a secure **VS Code** environment using two container
 
 ```bash
 # 1. Start everything
-docker compose up --build
+docker compose -f docker/docker-compose.yml up --build
 
 # 2. Access
 # https://localhost
@@ -27,7 +27,7 @@ graph LR
 
 ### Networking
 
-- **Locally**: `docker-compose.yml` runs two services. Caddy proxies to `app:8080`.
+- **Locally**: `docker/docker-compose.yml` runs two services. Caddy proxies to `app:8080`.
 - **Azure ACI**: Both containers run in the **same container group** (pod). Caddy proxies to `localhost:8080`.
 
 ## Configuration
@@ -52,7 +52,7 @@ RUN code-server --install-extension rooveterinaryinc.roo-cline
 To add more, edit the Dockerfile and rebuild:
 
 ```bash
-docker compose build
+docker compose -f docker/docker-compose.yml build
 ```
 
 ## Troubleshooting
@@ -63,12 +63,12 @@ This means Caddy cannot reach code-server.
 
 1. Check if `app` container is running:
    ```bash
-   docker compose ps
+   docker compose -f docker/docker-compose.yml ps
    ```
 
 2. Check logs:
    ```bash
-   docker compose logs app
+   docker compose -f docker/docker-compose.yml logs app
    ```
 
 ### Permission Issues
@@ -77,9 +77,9 @@ The `code-server` container runs as user `coder` (UID 1000).
 If you mount a host directory, ensure your host user has ID 1000 or the files are writable by others.
 
 ```yaml
-# docker-compose.yml
+# docker/docker-compose.yml
 services:
   app:
     volumes:
-      - ./workspace:/home/coder/workspace
+         - ../workspace:/home/coder/workspace
 ```

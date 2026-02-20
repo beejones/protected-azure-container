@@ -10,11 +10,11 @@ Deploy **protected-container** to **Azure Container Instances (ACI)** with:
 
 ## Architecture
 
-ACI container group with 2 containers (configuration derived from `docker-compose.yml`):
+ACI container group with 2 containers (configuration derived from `docker/docker-compose.yml`):
 
 | Container | Purpose | Ports |
 |-----------|---------|-------|
-| `protected-container` | code-server | Matches `docker-compose.yml` (default 8080) |
+| `protected-container` | code-server | Matches `docker/docker-compose.yml` (default 8080) |
 | `tls-proxy` (Caddy) | TLS + Basic Auth | 80, 443 (public) |
 
 ```
@@ -105,7 +105,7 @@ Result: `<dns-label>.<location>.azurecontainer.io`
 Azure Container Instances treats a container `command:` as an **override** for the image's Docker `ENTRYPOINT`.
 This repo relies on the image entrypoint (`/usr/local/bin/azure_start.sh`) to fetch Key Vault runtime env and then `exec` the application.
 
-If your `docker-compose.yml` defines an app `command`, the deploy YAML generator will automatically prefix it with `/usr/local/bin/azure_start.sh` so the Key Vault fetch still runs.
+If your `docker/docker-compose.yml` defines an app `command`, the deploy YAML generator will automatically prefix it with `/usr/local/bin/azure_start.sh` so the Key Vault fetch still runs.
 
 If you're debugging a deployment where Key Vault logs are missing, check the app container's rendered YAML `command:` list includes `/usr/local/bin/azure_start.sh` as the first element.
 

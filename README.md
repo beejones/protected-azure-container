@@ -22,7 +22,7 @@ echo 'BASIC_AUTH_USER=admin' >> .env
 echo 'BASIC_AUTH_HASH=<paste-hash-here>' >> .env
 
 # Start the containers
-docker compose up --build
+docker compose -f docker/docker-compose.yml up --build
 ```
 
 Open `https://localhost` (accept the self-signed cert warning for local dev).
@@ -33,7 +33,7 @@ Two containers in a container group:
 
 | Container | Purpose | Ports |
 |-----------|---------|-------|
-| `protected-container` | code-server (VS Code) | Matches `docker-compose.yml` (default 8080) |
+| `protected-container` | code-server (VS Code) | Matches `docker/docker-compose.yml` (default 8080) |
 | `tls-proxy` (Caddy) | TLS termination + Basic Auth | 80, 443 |
 
 ```
@@ -43,6 +43,7 @@ Internet → Caddy (443) → [Basic Auth] → code-server (8080)
 ## Documentation
 
 - [Azure Container Deployment](docs/deploy/AZURE_CONTAINER.md) - Deploy to Azure Container Instances
+- [Ubuntu Server Deployment](docs/deploy/UBUNTU_SERVER.md) - Deploy to a standalone Ubuntu server (SSH + Docker Compose)
 - [code-server Setup](docs/CODE_SERVER.md) - Configuration and customization
 - [Env Schema](docs/deploy/ENV_SCHEMA.md) - How to add vars/secrets to the schema
 - [Add Your App](docs/deploy/ADD_YOUR_APP.md) - How to bundle and run your own app in this container
@@ -86,7 +87,7 @@ Create thin wrapper scripts in `scripts/deploy/` that:
 upstream_engine.main(argv_list, repo_root_override=repo_root)
 ```
 
-This ensures upstream resolves `.env`, `.env.deploy`, and `docker-compose.yml` from the right place.
+This ensures upstream resolves `.env`, `.env.deploy`, and `docker/docker-compose.yml` from the right place.
 
 If you also use the upstream GitHub Actions helpers, wrap them the same way (e.g. `gh_sync_actions_env.py`, `gh_nuke_secrets.py`).
 
@@ -118,7 +119,7 @@ At minimum, upstream expects:
 
 - A runtime `.env` (secrets / runtime config)
 - A deploy-time `.env.deploy` (Azure + registry configuration)
-- A `docker-compose.yml` where the main app service is marked with `x-deploy-role: app`
+- A `docker/docker-compose.yml` where the main app service is marked with `x-deploy-role: app`
 
 Start from the upstream examples (`env.example` and `env.deploy.example`), then adapt for your repo.
 
