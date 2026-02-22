@@ -540,6 +540,8 @@ def main() -> None:
                     current_branch = _detect_current_branch()
                     if current_branch and current_branch != default_branch:
                         subjects.add(f"repo:{repo}:ref:refs/heads/{current_branch}")
+                    elif current_branch == default_branch:
+                        print("ℹ️  [info] Skipping extra OIDC branch subject: current branch matches default branch")
 
             for subject in sorted(subjects):
                 _ensure_federated_credential(app_id=azure_client_id, repo=repo, subject=subject)

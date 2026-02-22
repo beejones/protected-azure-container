@@ -190,20 +190,22 @@ Run these checks after `python scripts/deploy/ubuntu_deploy.py`:
 
 ```bash
 # 1) SSH connectivity
-ssh ronny@192.168.1.45 "echo SSH_OK"
+ssh <user>@<host> "echo SSH_OK"
 
 # 2) Portainer is running
-ssh ronny@192.168.1.45 "docker ps --format '{{.Names}}' | grep -Fx portainer"
+ssh <user>@<host> "docker ps --format '{{.Names}}' | grep -Fx portainer"
 
 # 3) Stack containers are running
-ssh ronny@192.168.1.45 "docker ps --format '{{.Names}}\t{{.Status}}' | grep -E 'protected-container|tls-proxy|caddy'"
+ssh <user>@<host> "docker ps --format '{{.Names}}\t{{.Status}}' | grep -E 'protected-container|tls-proxy|caddy'"
 
 # 4) Portainer UI reachable
-curl -k -I https://192.168.1.45:9943/
+curl -k -I https://<host>:<port>/
 
 # 5) App endpoint reachable (replace with your domain if configured)
-curl -k -I https://192.168.1.45/
+curl -k -I https://<host>/
 ```
+
+Use `-k` only when testing against a self-signed certificate. Omit `-k` for valid public certificates.
 
 If step 3 returns nothing, open Portainer and inspect the stack logs/events.
 
