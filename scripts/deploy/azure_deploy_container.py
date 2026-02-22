@@ -454,6 +454,21 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     args = parser.parse_args(argv)
 
+    step_number = 0
+    step_color = "\033[95m"
+    color_reset = "\033[0m"
+
+    def log_step(message: str, *, icon: str = "🚀") -> None:
+        nonlocal step_number
+        step_number += 1
+        print(f"{step_color}[deploy] {icon} Step {step_number}: {message}{color_reset}")
+
+    def log_info(message: str, *, icon: str = "ℹ️") -> None:
+        print(f"[deploy] {icon} {message}")
+
+    def log_warn(message: str) -> None:
+        print(f"[deploy] ⚠️ {message}", file=sys.stderr)
+
     # scripts/deploy/azure_deploy_container.py -> repo root is 2 parents up.
     repo_root = repo_root_override or Path(__file__).resolve().parents[2]
     if str(repo_root) not in sys.path:
@@ -670,9 +685,40 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 deploy_kv_file.update(deploy_secrets_kv)
 
             if deploy_kv_file:
+                deploy_schema_keys = {spec.key.value for spec in DEPLOY_SCHEMA}
+                tolerated_prefixes = ("UBUNTU_", "PORTAINER_")
+                tolerated_exact_keys = {"UBUNTU_HTTPS_PORT"}
+
+                filtered_deploy_kv: dict[str, str] = {}
+                unexpected_unknown_keys: list[str] = []
+                ignored_cross_target_keys: list[str] = []
+
+                for key, value in deploy_kv_file.items():
+                    if key in deploy_schema_keys:
+                        filtered_deploy_kv[key] = value
+                        continue
+
+                    if key in tolerated_exact_keys or any(key.startswith(prefix) for prefix in tolerated_prefixes):
+                        ignored_cross_target_keys.append(key)
+                        continue
+
+                    unexpected_unknown_keys.append(key)
+
+                if ignored_cross_target_keys:
+                    print(
+                        "ℹ️  [deploy] Ignoring non-Azure deploy keys during validation: "
+                        + ", ".join(sorted(ignored_cross_target_keys))
+                    )
+
+                if unexpected_unknown_keys:
+                    raise EnvValidationError(
+                        context=f"deploy ({deploy_env_path.name} + {deploy_secrets_env.name})",
+                        problems=[f"Unknown key(s): {', '.join(sorted(unexpected_unknown_keys))}"],
+                    )
+
                 validate_known_keys(
                     DEPLOY_SCHEMA, 
-                    deploy_kv_file, 
+                    filtered_deploy_kv,
                     context=f"deploy ({deploy_env_path.name} + {deploy_secrets_env.name})"
                 )
         except EnvValidationError as e:
@@ -770,7 +816,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         if bool(args.nuke_github_secrets):
             nuke_script = repo_root / "scripts" / "deploy" / "gh_nuke_secrets.py"
             if nuke_script.exists():
-                print(f"🧨 [deploy] Nuking GitHub secrets: python3 {nuke_script}")
+                log_step(f"Nuking GitHub secrets via {nuke_script}", icon="🧨")
                 # We pass --yes if the deploy script is not interactive? 
                 # Actually, gh_nuke_secrets.py is interactive by default. 
                 # If the user passed --no-interactive to this script, we should probably pass --yes to nuke.
@@ -780,9 +826,10 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
                 subprocess.run(nuke_cmd, check=True)
             else:
-                print(f"⚠️  [deploy] Nuke script not found: {nuke_script}", file=sys.stderr)
+                log_warn(f"Nuke script not found: {nuke_script}")
 
         if bool(args.set_vars_secrets):
+            log_step("Syncing GitHub Actions vars/secrets", icon="🔄")
             sync_github_actions_vars_secrets(repo_root=repo_root, deploy_env_path=deploy_env_path, azure_client_id=oidc_client_id)
 
         rg = (args.resource_group or os.getenv(VarsEnum.AZURE_RESOURCE_GROUP.value) or "").strip()
@@ -828,6 +875,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             raise SystemExit(
                 f"Invalid {VarsEnum.AZURE_FILE_SHARE_QUOTA_GB.value}={quota_raw!r}. Must be an integer number of GB."
             )
+        log_step("Ensuring Azure infrastructure resources", icon="🏗️")
         ensure_infra(
             resource_group=rg,
             location=location,
@@ -869,7 +917,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 updates[VarsEnum.AZURE_OIDC_APP_NAME.value] = oidc_app_name_for_writeback
             if updates:
                 write_dotenv_values(path=deploy_env_path, updates=updates, create=True)
-                print(f"🔑 [env] Updated {deploy_env_path} with derived Azure IDs")
+                log_info(f"Updated {deploy_env_path} with derived Azure IDs", icon="🔑")
         if oidc_client_id and subscription_id:
             ensure_oidc_app_role_assignment(
                 subscription_id=subscription_id, 
@@ -881,6 +929,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         # Upload runtime env to Key Vault for the container to fetch at startup.
         # By default we upload only BASIC_AUTH_* keys to avoid leaking deploy credentials.
         if args.upload_env:
+            log_step("Uploading runtime environment to Key Vault", icon="🔐")
             # By default, always upload the repo root .env (runtime) so KV has the latest
             # runtime configuration, even if deploy-time values are loaded from .env.deploy.
             default_runtime_env = repo_root / ".env"
@@ -908,7 +957,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
             # Upload runtime secrets (if any)
             if secrets_env_path.exists():
-                print(f"Uploading secrets from {secrets_env_path} ...")
+                log_info(f"Uploading secrets from {secrets_env_path}", icon="🔐")
                 # Secrets are uploaded raw (no filtering needed as the file itself is the filter)
                 secrets_content = secrets_env_path.read_text()
                 try:
@@ -925,7 +974,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         if persist_to_kv:
             kv_ok = kv_data_plane_available(kv_name)
             if not kv_ok:
-                print("[deploy] Disabling --persist-to-keyvault because Key Vault is not reachable.", file=sys.stderr)
+                log_warn("Disabling --persist-to-keyvault because Key Vault is not reachable.")
                 persist_to_kv = False
             else:
                 kv_name_for_secrets = kv_name
@@ -1120,6 +1169,13 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             persist_to_kv=False,
         )
 
+        if (not wants_registry_creds) and image.startswith("ghcr.io/") and registry_username and registry_password:
+            registry_server = "ghcr.io"
+            log_info("Using provided GHCR credentials for ACI image pull auth", icon="🔐")
+        elif not wants_registry_creds:
+            registry_username = None
+            registry_password = None
+
         if ghcr_private and not (registry_username and registry_password):
             raise SystemExit(
                 "GHCR_PRIVATE=true but GHCR credentials are incomplete. Set GHCR_USERNAME/GHCR_TOKEN."
@@ -1153,7 +1209,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                     dockerfile = None
     
             if build_requested:
-                print(f"🏗️  [docker] building image: {image}")
+                log_step(f"Building Docker image {image}", icon="🏗️")
                 try:
                     docker_build(image=image, context_dir=docker_context, dockerfile=dockerfile)
                 except FileNotFoundError:
@@ -1162,8 +1218,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             if push_requested:
                 assert registry_server and registry_username and registry_password
                 try:
+                    log_step(f"Pushing Docker image {image}", icon="📦")
                     docker_login(registry=registry_server, username=registry_username, token=registry_password)
-                    print(f"📦 [docker] pushing image: {image}")
                     try:
                         docker_push(image=image)
                     except subprocess.CalledProcessError as e:
@@ -1190,10 +1246,11 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     
         # Recreate container group for identity/env updates.
         # Delete existing container if any, then wait for Azure to fully clean up to prevent "Conflict" errors.
+        log_step("Deleting previous container group (if exists)", icon="🧹")
         run_az_command(["container", "delete", "--resource-group", rg, "--name", name, "--yes"], capture_output=False, ignore_errors=True)
     
         # Wait for container to be fully deleted (not just deletion initiated)
-        print("⏳ [deploy] Waiting for previous container to be fully deleted...")
+        log_step("Waiting for previous container deletion to complete", icon="⏳")
         max_wait = 120  # seconds
         poll_interval = 5
         waited = 0
@@ -1207,21 +1264,21 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             )
             if result is None:
                 # Container no longer exists
-                print(f"✅ [deploy] Previous container deleted after {waited}s")
+                log_info(f"Previous container deleted after {waited}s", icon="✅")
                 break
             state = str(result).strip().lower()
             if state in ("deleting", "pending"):
-                print(f"⏳ [deploy] Container still {state}... waiting")
+                log_info(f"Container still {state}... waiting", icon="⏳")
             time.sleep(poll_interval)
             waited += poll_interval
         else:
-            print(f"⚠️  [deploy] Timed out waiting for container deletion after {max_wait}s, proceeding anyway...")
+            log_warn(f"Timed out waiting for container deletion after {max_wait}s, proceeding anyway...")
 
         caddy_image = (args.caddy_image or "").strip() or config_caddy_image
 
         if args.prefetch_images:
             try:
-                print(f"🔎 [docker] prefetching caddy image: {caddy_image}")
+                log_step(f"Prefetching sidecar image {caddy_image}", icon="🔎")
                 docker_pull(image=caddy_image)
 
                 # If we are using GHCR for the main image, mirror Caddy to GHCR as well to avoid
@@ -1238,9 +1295,9 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                     caddy_mirror_tag = f"{repo_prefix}/caddy:2-alpine"
 
                     if caddy_image == caddy_mirror_tag:
-                        print(f"ℹ️  [docker] Caddy image already in GHCR namespace: {caddy_image}")
+                        log_info(f"Caddy image already in GHCR namespace: {caddy_image}")
                     else:
-                        print(f"🔁 [docker] Mirroring caddy to GHCR: {caddy_mirror_tag}")
+                        log_step(f"Mirroring caddy image to GHCR ({caddy_mirror_tag})", icon="🔁")
                         try:
                             # Retag
                             subprocess.run(["docker", "tag", caddy_image, caddy_mirror_tag], check=True, capture_output=True)
@@ -1248,7 +1305,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                             docker_push(image=caddy_mirror_tag)
                             # Use the mirrored image in the YAML
                             caddy_image = caddy_mirror_tag
-                            print(f"✅ [docker] Successfully mirrored caddy. Using: {caddy_image}")
+                            log_info(f"Successfully mirrored caddy. Using: {caddy_image}", icon="✅")
                         except subprocess.CalledProcessError as e:
                             hint = _hint_for_ghcr_scope_error(getattr(e, "stderr", None))
                             if hint:
@@ -1293,7 +1350,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         if not other_image and detected_other_name and detected_other_name in services:
             other_svc = services[detected_other_name]
             other_image = compose_helpers.get_image(other_svc)
-            print(f"ℹ️  [deploy] Detected other service '{detected_other_name}' -> {other_image}")
+            log_info(f"Detected other service '{detected_other_name}' -> {other_image}")
     
         other_cpu_cores = float(
         os.getenv(VarsEnum.OTHER_CPU_CORES.value)
@@ -1394,7 +1451,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             f.write(yaml_text)
             yaml_path = f.name
 
-        print(f"📝 [deploy] wrote: {yaml_path}")
+        log_step("Rendered ACI YAML deployment manifest", icon="📝")
+        log_info(f"wrote: {yaml_path}")
 
         # Hook: pre_az_apply
         hooks.call("pre_az_apply", ctx, plan, Path(yaml_path))
@@ -1402,6 +1460,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         # Retry container creation with exponential backoff for transient registry errors
         max_retries = 5
         base_delay = 10.0  # seconds
+        log_step("Applying deployment to Azure Container Instances", icon="🚀")
         for attempt in range(1, max_retries + 1):
             try:
                 res = run_az_command(["container", "create", "--resource-group", rg, "--file", yaml_path], capture_output=False)
@@ -1424,12 +1483,12 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                     # Not a transient error or out of retries
                     raise
 
-        print("\n[done] Deployed.")
-        print(f"  FQDN: {dns_label}.{location}.azurecontainer.io")
+        print("[deploy] ✅ Done.")
+        log_info(f"FQDN: {dns_label}.{location}.azurecontainer.io", icon="🌍")
         if deploy_mode in {"web-caddy", "full"}:
-            print(f"  https://{public_domain}/")
+            log_info(f"https://{public_domain}/", icon="🔗")
         else:
-            print(f"  http://{dns_label}.{location}.azurecontainer.io:{plan.app_port}/")
+            log_info(f"http://{dns_label}.{location}.azurecontainer.io:{plan.app_port}/", icon="🔗")
     except SystemExit:
         # Re-raise SystemExits (usually from validation or argparse)
         raise

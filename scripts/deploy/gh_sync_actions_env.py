@@ -408,7 +408,38 @@ def main() -> None:
         if secrets_path.exists():
             runtime_kv.update(parse_dotenv_file(secrets_path))
 
-        validate_known_keys(DEPLOY_SCHEMA, deploy_kv, context=f"deploy ({deploy_path.name} + {deploy_secrets_path.name})")
+        deploy_schema_keys = {spec.key.value for spec in DEPLOY_SCHEMA}
+        tolerated_prefixes = ("UBUNTU_", "PORTAINER_")
+        tolerated_exact_keys = {"UBUNTU_HTTPS_PORT"}
+
+        filtered_deploy_kv: dict[str, str] = {}
+        unexpected_unknown_keys: list[str] = []
+        ignored_cross_target_keys: list[str] = []
+
+        for key, value in deploy_kv.items():
+            if key in deploy_schema_keys:
+                filtered_deploy_kv[key] = value
+                continue
+
+            if key in tolerated_exact_keys or any(key.startswith(prefix) for prefix in tolerated_prefixes):
+                ignored_cross_target_keys.append(key)
+                continue
+
+            unexpected_unknown_keys.append(key)
+
+        if ignored_cross_target_keys:
+            print(
+                "ℹ️  [info] Ignoring non-Azure deploy keys during validation: "
+                + ", ".join(sorted(ignored_cross_target_keys))
+            )
+
+        if unexpected_unknown_keys:
+            raise EnvValidationError(
+                context=f"deploy ({deploy_path.name} + {deploy_secrets_path.name})",
+                problems=[f"Unknown key(s): {', '.join(sorted(unexpected_unknown_keys))}"],
+            )
+
+        validate_known_keys(DEPLOY_SCHEMA, filtered_deploy_kv, context=f"deploy ({deploy_path.name} + {deploy_secrets_path.name})")
         validate_known_keys(RUNTIME_SCHEMA + SECRETS_SCHEMA, runtime_kv, context=f"runtime ({runtime_path.name} + {secrets_path.name})")
 
         # Apply defaults and validate required keys for the dotenv portions.
@@ -418,11 +449,10 @@ def main() -> None:
 
         # Allow deploy-script-derived values (e.g. AZURE_OIDC_APP_NAME) to satisfy schema validation
         # when this script is invoked as a subprocess from azure_deploy_container.py.
-        deploy_schema_keys = {spec.key.value for spec in DEPLOY_SCHEMA}
         deploy_kv_env = {k: v for k, v in os.environ.items() if k in deploy_schema_keys and str(v).strip()}
-        deploy_kv.update(deploy_kv_env)
+        filtered_deploy_kv.update(deploy_kv_env)
 
-        deploy_kv = apply_defaults(DEPLOY_SCHEMA, deploy_kv)
+        deploy_kv = apply_defaults(DEPLOY_SCHEMA, filtered_deploy_kv)
         # Only require keys that belong to deploy dotenvs.
         deploy_dotenv_specs = [spec for spec in DEPLOY_SCHEMA if {EnvTarget.DOTENV_DEPLOY, EnvTarget.DOTENV_DEPLOY_SECRETS}.intersection(spec.targets)]
         validate_required(deploy_dotenv_specs, deploy_kv, context=f"deploy ({deploy_path.name} + {deploy_secrets_path.name})")

@@ -33,10 +33,14 @@ Use the Ubuntu deploy engine:
 ```bash
 source .venv/bin/activate
 python scripts/deploy/ubuntu_deploy.py \
-  --host user@your-server \
   --remote-dir /opt/protected-container \
   --sync-secrets
 ```
+
+`--host` is optional if `UBUNTU_SSH_HOST` is set (resolution order: CLI `--host` → env var `UBUNTU_SSH_HOST` → `.env.deploy`).
+`--remote-dir` is optional if `UBUNTU_REMOTE_DIR` is set (resolution order: CLI `--remote-dir` → env var `UBUNTU_REMOTE_DIR` → `.env.deploy` → `/opt/protected-container`).
+
+`python scripts/deploy/ubuntu_deploy.py` can run with no args when defaults are present in `.env.deploy` / `.env.deploy.secrets`.
 
 This copies:
 
@@ -45,11 +49,82 @@ This copies:
 - `docker/`
 - optionally `.env` + `.env.secrets`
 
-Then runs `docker compose pull` and `docker compose up -d` on the server.
+Then triggers the configured Portainer stack webhook.
 
 ## Updating
 
 Re-run the deploy command after pushing a new image or changing compose configuration.
+
+## Optional: Portainer on Ubuntu
+
+If you want to manage containers and stacks from a UI, run Portainer CE on the server.
+
+Valid ports are `1-65535`; use host port `9943` (not `99443`) mapped to Portainer's internal `9443`.
+
+```bash
+docker volume create portainer_data
+
+docker run -d \
+  --name portainer \
+  --restart=unless-stopped \
+  -p 8000:8000 \
+  -p 9943:9443 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v portainer_data:/data \
+  portainer/portainer-ce:latest
+```
+
+Then open:
+
+- `https://<server-ip>:9943`
+
+If UFW is enabled, allow:
+
+```bash
+sudo ufw allow 9943/tcp
+```
+
+### Portainer stack for this repo
+
+- Single-app server (per-stack Caddy):
+  - `docker/docker-compose.yml`
+  - `docker/docker-compose.ubuntu.yml`
+- Multi-app server with shared Caddy:
+  - `docker/docker-compose.yml`
+  - `docker/docker-compose.ubuntu.yml`
+  - `docker/docker-compose.shared-caddy.yml`
+
+For shared-Caddy mode, create the external network once:
+
+```bash
+docker network create caddy
+```
+
+### Deploy via Portainer webhook
+
+To keep the app registered under a Portainer stack, let Portainer perform the deploy.
+
+Use the Ubuntu deploy script:
+
+```bash
+export PORTAINER_WEBHOOK_TOKEN=<token-tail-only>
+
+python scripts/deploy/ubuntu_deploy.py \
+  --remote-dir /home/ronny/containers/protected-container \
+  --sync-secrets
+```
+
+Notes:
+
+- Portainer webhook deployment is the only deployment mode.
+- `PORTAINER_WEBHOOK_TOKEN` is only the **last token segment** from the webhook URL, not the full URL.
+- Token resolution order is: `--portainer-webhook-token` → `PORTAINER_WEBHOOK_TOKEN` env var → `.env.deploy.secrets`.
+- Webhook URL resolution order is: `--portainer-webhook-url` → `PORTAINER_WEBHOOK_URL` env var → `.env.deploy.secrets` → `.env.deploy`.
+- Additional defaults from `.env.deploy`: `UBUNTU_COMPOSE_FILES`, `UBUNTU_SYNC_SECRETS`, `PORTAINER_HTTPS_PORT`, `PORTAINER_WEBHOOK_INSECURE`.
+- The script automatically ensures Portainer is running on the server (creates or starts `portainer` container).
+- Use `--portainer-https-port` to change the auto-created Portainer host port (default `9943`).
+- Use `--portainer-webhook-insecure` if your webhook URL uses a self-signed TLS certificate.
+- Optional override: pass `--portainer-webhook-url` if you prefer using the full webhook URL directly.
 
 ## Notes
 
@@ -76,8 +151,7 @@ Then deploy the app stack using the extra override file:
 
 ```bash
 python scripts/deploy/ubuntu_deploy.py \
-  --host user@your-server \
-  --remote-dir /opt/protected-container \
+  --remote-dir /home/ronny/containers/protected-container \
   --compose-files docker/docker-compose.yml,docker/docker-compose.ubuntu.yml,docker/docker-compose.shared-caddy.yml
 ```
 

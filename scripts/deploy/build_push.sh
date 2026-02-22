@@ -3,6 +3,7 @@
 # Usage: ./scripts/deploy/build_push.sh [tag]  (default: latest)
 #
 # Reads from env or .env.deploy:
+#   APP_IMAGE    e.g. ghcr.io/beejones/protected-container:latest
 #   REGISTRY     e.g. ghcr.io
 #   IMAGE_NAME   e.g. beejones/my-app
 #   DOCKERFILE   e.g. docker/Dockerfile (default)
@@ -17,10 +18,16 @@ if [ -f .env.deploy ]; then
 fi
 
 REGISTRY="${REGISTRY:-ghcr.io}"
-IMAGE_NAME="${IMAGE_NAME:?IMAGE_NAME must be set}"
 DOCKERFILE="${DOCKERFILE:-docker/Dockerfile}"
 TAG="${1:-latest}"
-FULL_IMAGE="$REGISTRY/$IMAGE_NAME:$TAG"
+
+APP_IMAGE="${APP_IMAGE:-}"
+if [ -n "$APP_IMAGE" ]; then
+  FULL_IMAGE="$APP_IMAGE"
+else
+  IMAGE_NAME="${IMAGE_NAME:?IMAGE_NAME must be set when APP_IMAGE is not set}"
+  FULL_IMAGE="$REGISTRY/$IMAGE_NAME:$TAG"
+fi
 
 echo "[build-push] Building $FULL_IMAGE..."
 docker build -f "$DOCKERFILE" -t "$FULL_IMAGE" .
