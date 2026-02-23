@@ -27,7 +27,7 @@ Before deploying Caddy, you must configure your DNS provider so Let's Encrypt ca
 
 Create two `A` records (or `CNAME` records) pointing to your Ubuntu server's public IP address:
 - `portainer.your-domain.com` (for the admin panel)
-- `protected.your-domain.com` (for the actual app)
+- `protected-container.your-domain.com` (for the actual app)
 
 *If your DNS is not propagated, Caddy will fail to get SSL certificates and will return 502 Bad Gateway errors.*
 
@@ -112,4 +112,8 @@ docker logs central-proxy
 Common issues:
 - **Rate Limits**: Let's Encrypt limits failed validations. Double-check your DNS points to the correct IP.
 - **Container Not Found**: Caddy resolves upstream targets by their container name (e.g., `reverse_proxy portainer:9000`). If the container is not on the `caddy` network or its name differs, Caddy will return a 502 error.
+
+## Adding Other Projects to Caddy
+
+If you have additional services on the same server that need HTTPS routing through the centralized proxy, see [Shared Caddy Routing](SHARED_CADDY_ROUTING.md).
 
