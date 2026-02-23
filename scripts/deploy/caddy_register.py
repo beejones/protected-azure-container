@@ -80,6 +80,25 @@ def _domain_present(caddyfile_text: str, domain: str) -> bool:
     return bool(pattern.search(caddyfile_text))
 
 
+def _public_domain_placeholder_present(caddyfile_text: str) -> bool:
+    """Return True when a site block uses {$PUBLIC_DOMAIN}."""
+    pattern = re.compile(r"^(?!\s*#)\s*\{\$PUBLIC_DOMAIN\}\s*\{", re.MULTILINE)
+    return bool(pattern.search(caddyfile_text))
+
+
+def _remote_public_domain(*, ssh_host: str, caddy_container: str) -> str:
+    """Read PUBLIC_DOMAIN from remote Caddy container env if available."""
+    cmd = (
+        f"docker inspect {shlex.quote(caddy_container)} "
+        "--format '{{range .Config.Env}}{{println .}}{{end}}' "
+        "| grep '^PUBLIC_DOMAIN=' | head -n1 | cut -d= -f2-"
+    )
+    result = _ssh_run(ssh_host, cmd, check=False)
+    if result.returncode != 0:
+        return ""
+    return str(result.stdout or "").strip()
+
+
 def _result_text(result: subprocess.CompletedProcess) -> str:
     stderr = str(result.stderr or "").strip()
     stdout = str(result.stdout or "").strip()
@@ -125,6 +144,22 @@ def ensure_caddy_registration(
     if _domain_present(caddyfile_text, domain):
         logger.info("%s %s already registered", LOG_PREFIX, domain)
         return False
+
+    # Special case: the base Caddyfile may already define {$PUBLIC_DOMAIN}.
+    # If that placeholder resolves to this domain in the running proxy
+    # container, skip appending a literal duplicate site block.
+    if _public_domain_placeholder_present(caddyfile_text):
+        resolved_public_domain = _remote_public_domain(
+            ssh_host=ssh_host,
+            caddy_container=caddy_container,
+        )
+        if resolved_public_domain and resolved_public_domain == domain:
+            logger.info(
+                "%s %s already covered by {$PUBLIC_DOMAIN} placeholder",
+                LOG_PREFIX,
+                domain,
+            )
+            return False
 
     # 3. Build the site block  ───────────────────────────────────────────
     block = SITE_BLOCK_TEMPLATE.format(domain=domain, service=service, port=port)

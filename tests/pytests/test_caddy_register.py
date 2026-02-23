@@ -121,3 +121,33 @@ def test_ensure_caddy_registration_raises_runtime_error_on_validate_failure(monk
         text = str(exc)
         assert "validation failed" in text
         assert "docker logs central-proxy" in text
+
+
+def test_ensure_caddy_registration_skips_when_public_domain_placeholder_matches(monkeypatch) -> None:
+    calls: list[str] = []
+    caddyfile_text = """
+{$PUBLIC_DOMAIN} {
+    reverse_proxy protected-container:8080
+}
+"""
+
+    def fake_ssh_run(host: str, cmd: str, **_: object) -> subprocess.CompletedProcess:
+        calls.append(cmd)
+        if cmd.startswith("cat "):
+            return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout=caddyfile_text, stderr="")
+        if "docker inspect" in cmd:
+            return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="example.com\n", stderr="")
+        return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(caddy_register, "_ssh_run", fake_ssh_run)
+
+    out = caddy_register.ensure_caddy_registration(
+        ssh_host="user@host",
+        domain="example.com",
+        service="protected-container",
+        port="8080",
+        caddyfile_path="/opt/proxy/Caddyfile",
+    )
+
+    assert out is False
+    assert any("docker inspect" in cmd for cmd in calls)
