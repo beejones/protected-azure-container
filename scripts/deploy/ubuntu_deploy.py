@@ -26,9 +26,12 @@ import yaml
 
 sys.path.append(str(Path(__file__).parent))
 
+import caddy_register
 import portainer_helpers
 
 
+ENV_PUBLIC_DOMAIN = "PUBLIC_DOMAIN"
+ENV_WEB_PORT = "WEB_PORT"
 ENV_APP_IMAGE = "APP_IMAGE"
 ENV_DOCKERFILE = "DOCKERFILE"
 ENV_GHCR_USERNAME = "GHCR_USERNAME"
@@ -596,25 +599,56 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     if has_portainer_api_auth and not resolved_portainer_webhook_url:
         log_step("Stack deployed via Portainer API; webhook token not returned, skipping webhook trigger", icon="✅")
-        print("[ubuntu-deploy] ✅ Done.")
-        return
-
-    webhook_urls = (
-        [resolved_portainer_webhook_url]
-        if resolved_portainer_webhook_url
-        else portainer_helpers.build_portainer_webhook_urls_from_token(
-            host=resolved_host,
-            https_port=resolved_portainer_https_port,
-            webhook_token=resolved_portainer_token,
+    else:
+        webhook_urls = (
+            [resolved_portainer_webhook_url]
+            if resolved_portainer_webhook_url
+            else portainer_helpers.build_portainer_webhook_urls_from_token(
+                host=resolved_host,
+                https_port=resolved_portainer_https_port,
+                webhook_token=resolved_portainer_token,
+            )
         )
-    )
 
-    log_step("Triggering Portainer webhook", icon="🪝")
-    portainer_helpers.trigger_portainer_webhook(
-        urls=webhook_urls,
-        insecure=resolved_portainer_webhook_insecure,
-        has_api_auth=has_portainer_api_auth,
-    )
+        log_step("Triggering Portainer webhook", icon="🪝")
+        portainer_helpers.trigger_portainer_webhook(
+            urls=webhook_urls,
+            insecure=resolved_portainer_webhook_insecure,
+            has_api_auth=has_portainer_api_auth,
+        )
+
+    # --- Post-deploy: register with centralized Caddy proxy ----------------
+    resolved_public_domain = str(os.getenv(ENV_PUBLIC_DOMAIN) or "").strip()
+    if not resolved_public_domain:
+        resolved_public_domain = read_deploy_key(repo_root=repo_root, key=ENV_PUBLIC_DOMAIN)
+
+    resolved_web_port = str(os.getenv(ENV_WEB_PORT) or "").strip()
+    if not resolved_web_port:
+        resolved_web_port = read_deploy_key(repo_root=repo_root, key=ENV_WEB_PORT)
+    if not resolved_web_port:
+        resolved_web_port = "3000"
+
+    if resolved_public_domain:
+        # Derive service name from the Portainer stack name (which matches the
+        # primary compose service name by convention).
+        service_name = resolved_portainer_stack_name or remote_dir.name
+
+        # The proxy Caddyfile lives in the proxy stack's repo on the same host.
+        # By convention the proxy repo is checked out at the sibling path of
+        # of the UBUNTU_REMOTE_DIR parent, under protected-container.
+        proxy_repo_dir = remote_dir.parent / "protected-container"
+        caddyfile_path = str(proxy_repo_dir / "docker" / "proxy" / "Caddyfile")
+
+        log_step("Registering with centralized Caddy proxy", icon="🔒")
+        caddy_register.ensure_caddy_registration(
+            ssh_host=resolved_host,
+            domain=resolved_public_domain,
+            service=service_name,
+            port=resolved_web_port,
+            caddyfile_path=caddyfile_path,
+        )
+    else:
+        log_info("PUBLIC_DOMAIN not set — skipping Caddy registration.", icon="⚠️")
 
     print("[ubuntu-deploy] ✅ Done.")
 

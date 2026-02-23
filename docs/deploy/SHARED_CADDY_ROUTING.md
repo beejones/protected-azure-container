@@ -68,10 +68,27 @@ myapp.example.com {
 
 Whenever you change the `Caddyfile`, validate the configuration and reload the proxy without downtime.
 
-```bash
-# 1. Validate the syntax first
-docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile
+Note: the Caddyfile is bind-mounted read-only into the container.  Edit the **host** file, then **restart** the container (a simple `caddy reload` will not pick up the new inode):
 
-# 2. If valid, reload the configuration
-docker exec central-proxy caddy reload --config /etc/caddy/Caddyfile
+```bash
+# 1. Edit the host-side Caddyfile, then:
+docker restart central-proxy
+
+# 2. Validate the syntax
+docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
+
+## Automatic Registration via `ubuntu_deploy.py`
+
+When deploying with the upstream `ubuntu_deploy.py`, Caddy registration happens automatically as a post-deploy step.
+
+If `PUBLIC_DOMAIN` is set in `.env.deploy` (or as an environment variable), the deploy script will:
+
+1. Read the proxy Caddyfile on the remote host via SSH.
+2. Check if a site block for `PUBLIC_DOMAIN` already exists (idempotent).
+3. If missing, append a site block with `reverse_proxy <service>:<port>`.
+4. Restart the `central-proxy` container and validate the config.
+
+The service name is derived from `PORTAINER_STACK_NAME` (or the remote directory name), and the port from `WEB_PORT` (default `3000`).
+
+**No manual Caddyfile editing is needed when using the deploy script.** Steps 3–4 above are only required for ad-hoc changes outside the deploy pipeline.
