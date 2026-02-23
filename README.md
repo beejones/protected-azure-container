@@ -10,10 +10,12 @@ Small teams and solo operators often need the same things large enterprises get 
 
 If you run your own Ubuntu VPS, Hetzner box, or any Linux server with Docker, this repo provides an end-to-end deploy pipeline:
 
+By default, this repository deploys **code-server** as the example application payload behind the centralized Caddy proxy.
+
 - **One centralized [Caddy](https://caddyserver.com/) proxy** binds ports 80/443, handles Let's Encrypt certificates, and routes traffic by domain name to any number of containers on the same host.
 - **[Portainer](https://www.portainer.io/)** provides a lightweight management UI and webhook-based stack deploys — no Kubernetes required.
 - **`ubuntu_deploy.py`** is the single deploy command. It builds and pushes your image, syncs compose files and env vars to the remote host via SSH, triggers Portainer, and automatically registers your domain with the Caddy proxy.
-- **Multiple projects on one server** simply join the shared `caddy` Docker network. Each deploy auto-registers its own route — see [Shared Caddy Routing](docs/deploy/SHARED_CADDY_ROUTING.md).
+- **Multiple projects on one server** simply join the shared `caddy` Docker network. There is no need to expose different app host ports (only `80` and `443` on centralized Caddy). Set the required `.env` / `.env.deploy` constants and run `scripts/deploy/ubuntu_deploy.py`; each deploy auto-registers its own route — see [Shared Caddy Routing](docs/deploy/SHARED_CADDY_ROUTING.md).
 
 This approach is ideal for self-hosters and small enterprises who want full control over their infrastructure at a fraction of the cost of managed cloud services.
 

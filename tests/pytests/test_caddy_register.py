@@ -88,3 +88,66 @@ def test_ensure_caddy_registration_appends_and_restarts(monkeypatch) -> None:
     assert "example.com {" in state["caddyfile"]
     assert "reverse_proxy my-service:8080" in state["caddyfile"]
     assert len(append_calls) == 1
+
+
+def test_ensure_caddy_registration_raises_runtime_error_on_validate_failure(monkeypatch) -> None:
+    state = {"caddyfile": ""}
+
+    def fake_ssh_run(host: str, cmd: str, **_: object) -> subprocess.CompletedProcess:
+        if cmd.startswith("cat "):
+            return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout=state["caddyfile"], stderr="")
+        if "caddy validate" in cmd:
+            return subprocess.CompletedProcess(args=["ssh"], returncode=1, stdout="", stderr="invalid caddyfile")
+        return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="", stderr="")
+
+    def fake_subprocess_run(full: list[str], input: str | None = None, text: bool = True, capture_output: bool = True, check: bool = True) -> subprocess.CompletedProcess:
+        if input:
+            state["caddyfile"] += input
+        return subprocess.CompletedProcess(args=full, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(caddy_register, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr(caddy_register.subprocess, "run", fake_subprocess_run)
+
+    try:
+        caddy_register.ensure_caddy_registration(
+            ssh_host="user@host",
+            domain="example.com",
+            service="my-service",
+            port="8080",
+            caddyfile_path="/opt/proxy/Caddyfile",
+        )
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        text = str(exc)
+        assert "validation failed" in text
+        assert "docker logs central-proxy" in text
+
+
+def test_ensure_caddy_registration_skips_when_public_domain_placeholder_matches(monkeypatch) -> None:
+    calls: list[str] = []
+    caddyfile_text = """
+{$PUBLIC_DOMAIN} {
+    reverse_proxy protected-container:8080
+}
+"""
+
+    def fake_ssh_run(host: str, cmd: str, **_: object) -> subprocess.CompletedProcess:
+        calls.append(cmd)
+        if cmd.startswith("cat "):
+            return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout=caddyfile_text, stderr="")
+        if "docker inspect" in cmd:
+            return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="example.com\n", stderr="")
+        return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(caddy_register, "_ssh_run", fake_ssh_run)
+
+    out = caddy_register.ensure_caddy_registration(
+        ssh_host="user@host",
+        domain="example.com",
+        service="protected-container",
+        port="8080",
+        caddyfile_path="/opt/proxy/Caddyfile",
+    )
+
+    assert out is False
+    assert any("docker inspect" in cmd for cmd in calls)

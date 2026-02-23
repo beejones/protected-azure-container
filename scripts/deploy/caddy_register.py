@@ -80,6 +80,31 @@ def _domain_present(caddyfile_text: str, domain: str) -> bool:
     return bool(pattern.search(caddyfile_text))
 
 
+def _public_domain_placeholder_present(caddyfile_text: str) -> bool:
+    """Return True when a site block uses {$PUBLIC_DOMAIN}."""
+    pattern = re.compile(r"^(?!\s*#)\s*\{\$PUBLIC_DOMAIN\}\s*\{", re.MULTILINE)
+    return bool(pattern.search(caddyfile_text))
+
+
+def _remote_public_domain(*, ssh_host: str, caddy_container: str) -> str:
+    """Read PUBLIC_DOMAIN from remote Caddy container env if available."""
+    cmd = (
+        f"docker inspect {shlex.quote(caddy_container)} "
+        "--format '{{range .Config.Env}}{{println .}}{{end}}' "
+        "| grep '^PUBLIC_DOMAIN=' | head -n1 | cut -d= -f2-"
+    )
+    result = _ssh_run(ssh_host, cmd, check=False)
+    if result.returncode != 0:
+        return ""
+    return str(result.stdout or "").strip()
+
+
+def _result_text(result: subprocess.CompletedProcess) -> str:
+    stderr = str(result.stderr or "").strip()
+    stdout = str(result.stdout or "").strip()
+    return stderr or stdout
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -120,6 +145,22 @@ def ensure_caddy_registration(
         logger.info("%s %s already registered", LOG_PREFIX, domain)
         return False
 
+    # Special case: the base Caddyfile may already define {$PUBLIC_DOMAIN}.
+    # If that placeholder resolves to this domain in the running proxy
+    # container, skip appending a literal duplicate site block.
+    if _public_domain_placeholder_present(caddyfile_text):
+        resolved_public_domain = _remote_public_domain(
+            ssh_host=ssh_host,
+            caddy_container=caddy_container,
+        )
+        if resolved_public_domain and resolved_public_domain == domain:
+            logger.info(
+                "%s %s already covered by {$PUBLIC_DOMAIN} placeholder",
+                LOG_PREFIX,
+                domain,
+            )
+            return False
+
     # 3. Build the site block  ───────────────────────────────────────────
     block = SITE_BLOCK_TEMPLATE.format(domain=domain, service=service, port=port)
 
@@ -151,14 +192,29 @@ def ensure_caddy_registration(
 
     # 6. Restart Caddy to pick up bind-mount changes & obtain cert  ─────
     logger.info("%s Restarting %s to pick up config", LOG_PREFIX, caddy_container)
-    _ssh_run(ssh_host, f"docker restart {shlex.quote(caddy_container)}")
+    restart_result = _ssh_run(
+        ssh_host,
+        f"docker restart {shlex.quote(caddy_container)}",
+        check=False,
+    )
+    if restart_result.returncode != 0:
+        detail = _result_text(restart_result)
+        raise RuntimeError(
+            f"Failed to restart {caddy_container} on {ssh_host}: {detail}"
+        )
 
     # Brief wait for Caddy to boot, then validate config inside container.
     validate_cmd = (
         f"sleep 3 && docker exec {shlex.quote(caddy_container)} "
         f"caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile"
     )
-    _ssh_run(ssh_host, validate_cmd)
+    validate_result = _ssh_run(ssh_host, validate_cmd, check=False)
+    if validate_result.returncode != 0:
+        detail = _result_text(validate_result)
+        raise RuntimeError(
+            "Caddy registration appended the route but config validation failed: "
+            f"{detail}. Check remote logs with: docker logs {caddy_container}"
+        )
 
     logger.info("%s Registered %s -> %s:%s", LOG_PREFIX, domain, service, port)
     return True
