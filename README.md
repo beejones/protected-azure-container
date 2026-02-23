@@ -1,13 +1,49 @@
-# Protected Azure Container
+# Protected Container
 
-A world-class protected container setup featuring:
-- **VS Code in browser** via [code-server](https://github.com/coder/code-server)
-- **TLS termination** with automatic Let's Encrypt certificates via Caddy
-- **Azure Key Vault** integration for secrets management
-- **Azure Managed Identity** for secure authentication
-- **GitHub Actions** CI/CD with OIDC authentication
+A production-ready deployment toolkit for running containerised application payloads behind automatic HTTPS, with a schema-driven secrets pipeline that keeps credentials out of your Git history.
 
-## Deployment Methods
+## Why this exists
+
+Small teams and solo operators often need the same things large enterprises get from managed platforms: TLS certificates, secrets management, CI/CD, and a repeatable deploy story — without the cost or lock-in. This repo gives you that in a single, opinionated toolkit you can fork, extend, and own.
+
+## Self-hosted servers (VPS / bare-metal)
+
+If you run your own Ubuntu VPS, Hetzner box, or any Linux server with Docker, this repo provides an end-to-end deploy pipeline:
+
+- **One centralized [Caddy](https://caddyserver.com/) proxy** binds ports 80/443, handles Let's Encrypt certificates, and routes traffic by domain name to any number of containers on the same host.
+- **[Portainer](https://www.portainer.io/)** provides a lightweight management UI and webhook-based stack deploys — no Kubernetes required.
+- **`ubuntu_deploy.py`** is the single deploy command. It builds and pushes your image, syncs compose files and env vars to the remote host via SSH, triggers Portainer, and automatically registers your domain with the Caddy proxy.
+- **Multiple projects on one server** simply join the shared `caddy` Docker network. Each deploy auto-registers its own route — see [Shared Caddy Routing](docs/deploy/SHARED_CADDY_ROUTING.md).
+
+This approach is ideal for self-hosters and small enterprises who want full control over their infrastructure at a fraction of the cost of managed cloud services.
+
+Start here: [Ubuntu Server Deployment](docs/deploy/UBUNTU_SERVER.md)
+
+## Azure Container Instances
+
+For teams already invested in Azure, the repo includes a parallel deploy path targeting Azure Container Instances (ACI):
+
+- **`azure_deploy_container.py`** renders a multi-container YAML from your `docker-compose.yml`, deploys to ACI, and wires up a Caddy sidecar for TLS.
+- **GitHub Actions CI/CD** with OIDC federation — no long-lived Azure credentials stored anywhere.
+- **Azure Key Vault** integration for secrets at runtime (Managed Identity, no passwords).
+
+Start here: [Azure Container Deployment](docs/deploy/AZURE_CONTAINER.md)
+
+## Keeping secrets secure
+
+Secrets management is a first-class concern, not an afterthought:
+
+| Layer | How it works |
+|-------|-------------|
+| **Schema-driven validation** | Every env key is declared in a strict schema ([`env_schema.py`](scripts/deploy/env_schema.py)). Unknown keys fail validation — no accidental leaks. |
+| **Split env files** | Non-sensitive config lives in `.env` / `.env.deploy`. Credentials go into `.env.secrets` / `.env.deploy.secrets`, which are git-ignored by default. |
+| **Azure Key Vault** | On ACI deploys, runtime secrets are uploaded as a single Key Vault secret and injected at container start via Managed Identity. |
+| **GitHub Actions sync** | `gh_sync_actions_env.py` pushes vars and secrets to GitHub Actions from the schema, so CI never reads raw dotenv files. |
+| **No secrets in Git** | Example files (`env.example`, `env.secrets.example`) document every key without containing real values. The deploy scripts validate completeness before shipping anything. |
+
+See [Env Schema](docs/deploy/ENV_SCHEMA.md) for the full guide on adding variables and secrets.
+
+## Deployment methods
 
 This repository supports three deployment methods depending on your target environment:
 
@@ -188,17 +224,6 @@ When you need to add new configuration keys, follow the schema guide: [docs/depl
 
 - **Roo Code** (`rooveterinaryinc.roo-cline`) - AI coding assistant
 - **GitHub Pull Requests** (`GitHub.vscode-pull-request-github`) - PR management
-
-## Environment Variables
-
-This repo uses a strict, schema-driven set of env keys.
-
-- Runtime config lives in `.env` (and is uploaded to Key Vault as a single secret).
-- Deploy-time config lives in `.env.deploy`.
-- Deployment reads `.env` first, then `.env.deploy` on top (deploy-time overrides).
-
-See env.example and env.deploy.example for the canonical keys.
-If you need to add a new key, follow: [docs/deploy/ENV_SCHEMA.md](docs/deploy/ENV_SCHEMA.md).
 
 ## License
 

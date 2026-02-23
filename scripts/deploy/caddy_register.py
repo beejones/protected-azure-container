@@ -9,10 +9,10 @@ Called by :func:`ubuntu_deploy.main` as a post-deploy step when
 """
 from __future__ import annotations
 
+import logging
 import re
 import shlex
 import subprocess
-from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
@@ -21,6 +21,10 @@ from pathlib import Path
 
 # Container name (from docker/proxy/docker-compose.yml).
 DEFAULT_CADDY_CONTAINER = "central-proxy"
+LOG_PREFIX = "[CADDY-REGISTER]"
+
+
+logger = logging.getLogger(__name__)
 
 # Template for the site block.  Placeholders: {domain}, {service}, {port}.
 SITE_BLOCK_TEMPLATE = """\
@@ -69,19 +73,11 @@ def _ssh_run(
 
 def _domain_present(caddyfile_text: str, domain: str) -> bool:
     """Return True if *domain* already has a site block."""
-    pattern = re.compile(r"^\s*" + re.escape(domain) + r"\s*\{", re.MULTILINE)
+    pattern = re.compile(
+        r"^(?!\s*#)\s*" + re.escape(domain) + r"\s*\{",
+        re.MULTILINE,
+    )
     return bool(pattern.search(caddyfile_text))
-
-
-def _resolve_caddyfile_path(remote_dir: Path | str) -> str:
-    """Derive the remote Caddyfile path from the upstream convention.
-
-    The proxy stack lives at ``<remote_dir>/docker/proxy/Caddyfile``.
-    On the server the bind-mount source is one level up from the current app
-    (the protected-container repo), so we fall back to the parent path when
-    the app-local path does not exist.
-    """
-    return str(Path(remote_dir) / "docker" / "proxy" / "Caddyfile")
 
 
 # ---------------------------------------------------------------------------
@@ -110,9 +106,10 @@ def ensure_caddy_registration(
     result = _ssh_run(ssh_host, f"cat {shlex.quote(caddyfile_path)}", check=False)
     if result.returncode != 0:
         # Caddyfile not found — proxy stack not deployed yet.  Skip silently.
-        print(
-            f"[caddy-register] ⚠️  Caddyfile not found at {caddyfile_path} — "
-            f"proxy stack may not be deployed yet.  Skipping Caddy registration."
+        logger.warning(
+            "%s Caddyfile not found at %s; proxy stack may not be deployed yet. Skipping registration.",
+            LOG_PREFIX,
+            caddyfile_path,
         )
         return False
 
@@ -120,15 +117,15 @@ def ensure_caddy_registration(
 
     # 2. Already registered?  ────────────────────────────────────────────
     if _domain_present(caddyfile_text, domain):
-        print(f"[caddy-register] ✔  {domain} already registered")
+        logger.info("%s %s already registered", LOG_PREFIX, domain)
         return False
 
     # 3. Build the site block  ───────────────────────────────────────────
     block = SITE_BLOCK_TEMPLATE.format(domain=domain, service=service, port=port)
 
     if dry_run:
-        print(f"[caddy-register] [dry-run] Would append to {caddyfile_path}:")
-        print(block)
+        logger.info("%s [dry-run] Would append to %s", LOG_PREFIX, caddyfile_path)
+        logger.debug("%s [dry-run] Appended block:\n%s", LOG_PREFIX, block)
         return True
 
     # 4. Append to host Caddyfile  ──────────────────────────────────────
@@ -137,10 +134,12 @@ def ensure_caddy_registration(
         "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
         ssh_host, append_cmd,
     ]
-    proc = subprocess.run(full, input=block, text=True, capture_output=True)
-    if proc.returncode != 0:
+    try:
+        subprocess.run(full, input=block, text=True, capture_output=True, check=True)
+    except subprocess.CalledProcessError as exc:
+        detail = str(exc.stderr or "").strip() or str(exc.stdout or "").strip()
         raise RuntimeError(
-            f"Failed to append Caddy block on {ssh_host}: {proc.stderr.strip()}"
+            f"Failed to append Caddy block on {ssh_host}: {detail}"
         )
 
     # 5. Verify the write  ──────────────────────────────────────────────
@@ -151,7 +150,7 @@ def ensure_caddy_registration(
         )
 
     # 6. Restart Caddy to pick up bind-mount changes & obtain cert  ─────
-    print(f"[caddy-register] ⏳ Restarting {caddy_container} to pick up config …")
+    logger.info("%s Restarting %s to pick up config", LOG_PREFIX, caddy_container)
     _ssh_run(ssh_host, f"docker restart {shlex.quote(caddy_container)}")
 
     # Brief wait for Caddy to boot, then validate config inside container.
@@ -161,5 +160,5 @@ def ensure_caddy_registration(
     )
     _ssh_run(ssh_host, validate_cmd)
 
-    print(f"[caddy-register] ✅ Registered {domain} → {service}:{port}")
+    logger.info("%s Registered %s -> %s:%s", LOG_PREFIX, domain, service, port)
     return True

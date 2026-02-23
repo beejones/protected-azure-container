@@ -48,6 +48,7 @@ ENV_PORTAINER_WEBHOOK_TOKEN = "PORTAINER_WEBHOOK_TOKEN"
 ENV_PORTAINER_ACCESS_TOKEN = "PORTAINER_ACCESS_TOKEN"
 ENV_PORTAINER_STACK_NAME = "PORTAINER_STACK_NAME"
 ENV_PORTAINER_ENDPOINT_ID = "PORTAINER_ENDPOINT_ID"
+ENV_CADDY_PROXY_DIR = "CADDY_PROXY_DIR"
 
 
 def _subprocess_error_text(exc: subprocess.CalledProcessError) -> str:
@@ -628,15 +629,19 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if not resolved_web_port:
         resolved_web_port = "3000"
 
+    resolved_caddy_proxy_dir = str(os.getenv(ENV_CADDY_PROXY_DIR) or "").strip()
+    if not resolved_caddy_proxy_dir:
+        resolved_caddy_proxy_dir = read_deploy_key(repo_root=repo_root, key=ENV_CADDY_PROXY_DIR)
+
     if resolved_public_domain:
         # Derive service name from the Portainer stack name (which matches the
         # primary compose service name by convention).
         service_name = resolved_portainer_stack_name or remote_dir.name
 
         # The proxy Caddyfile lives in the proxy stack's repo on the same host.
-        # By convention the proxy repo is checked out at the sibling path of
-        # of the UBUNTU_REMOTE_DIR parent, under protected-container.
-        proxy_repo_dir = remote_dir.parent / "protected-container"
+        # Default convention: sibling path under protected-container.
+        # Override with CADDY_PROXY_DIR when downstream layout differs.
+        proxy_repo_dir = Path(resolved_caddy_proxy_dir) if resolved_caddy_proxy_dir else (remote_dir.parent / "protected-container")
         caddyfile_path = str(proxy_repo_dir / "docker" / "proxy" / "Caddyfile")
 
         log_step("Registering with centralized Caddy proxy", icon="🔒")
