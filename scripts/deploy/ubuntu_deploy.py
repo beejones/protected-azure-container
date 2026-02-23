@@ -645,13 +645,20 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         caddyfile_path = str(proxy_repo_dir / "docker" / "proxy" / "Caddyfile")
 
         log_step("Registering with centralized Caddy proxy", icon="🔒")
-        caddy_register.ensure_caddy_registration(
-            ssh_host=resolved_host,
-            domain=resolved_public_domain,
-            service=service_name,
-            port=resolved_web_port,
-            caddyfile_path=caddyfile_path,
-        )
+        try:
+            caddy_register.ensure_caddy_registration(
+                ssh_host=resolved_host,
+                domain=resolved_public_domain,
+                service=service_name,
+                port=resolved_web_port,
+                caddyfile_path=caddyfile_path,
+            )
+        except Exception as exc:
+            log_info(f"Caddy registration failed: {exc}", icon="⚠️")
+            log_info(
+                "Deployment completed, but public HTTPS routing may be unavailable until Caddy is fixed.",
+                icon="⚠️",
+            )
     else:
         log_info("PUBLIC_DOMAIN not set — skipping Caddy registration.", icon="⚠️")
 

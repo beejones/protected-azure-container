@@ -80,6 +80,12 @@ def _domain_present(caddyfile_text: str, domain: str) -> bool:
     return bool(pattern.search(caddyfile_text))
 
 
+def _result_text(result: subprocess.CompletedProcess) -> str:
+    stderr = str(result.stderr or "").strip()
+    stdout = str(result.stdout or "").strip()
+    return stderr or stdout
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -151,14 +157,29 @@ def ensure_caddy_registration(
 
     # 6. Restart Caddy to pick up bind-mount changes & obtain cert  ─────
     logger.info("%s Restarting %s to pick up config", LOG_PREFIX, caddy_container)
-    _ssh_run(ssh_host, f"docker restart {shlex.quote(caddy_container)}")
+    restart_result = _ssh_run(
+        ssh_host,
+        f"docker restart {shlex.quote(caddy_container)}",
+        check=False,
+    )
+    if restart_result.returncode != 0:
+        detail = _result_text(restart_result)
+        raise RuntimeError(
+            f"Failed to restart {caddy_container} on {ssh_host}: {detail}"
+        )
 
     # Brief wait for Caddy to boot, then validate config inside container.
     validate_cmd = (
         f"sleep 3 && docker exec {shlex.quote(caddy_container)} "
         f"caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile"
     )
-    _ssh_run(ssh_host, validate_cmd)
+    validate_result = _ssh_run(ssh_host, validate_cmd, check=False)
+    if validate_result.returncode != 0:
+        detail = _result_text(validate_result)
+        raise RuntimeError(
+            "Caddy registration appended the route but config validation failed: "
+            f"{detail}. Check remote logs with: docker logs {caddy_container}"
+        )
 
     logger.info("%s Registered %s -> %s:%s", LOG_PREFIX, domain, service, port)
     return True
