@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .models import upsert_registration
+
 
 _STORAGE_MANAGER_LABEL_PATTERN = re.compile(r"^storage-manager\.(\d+)\.(.+)$")
 
@@ -46,3 +48,33 @@ def discover_registrations_from_container_labels(labels: dict[str, str] | None) 
         out.append(payload)
 
     return out
+
+
+def discover_registrations_from_containers() -> list[dict[str, Any]]:
+    import docker
+
+    out: list[dict[str, Any]] = []
+    client = docker.from_env()
+    for container in client.containers.list():
+        attrs = dict(container.attrs or {})
+        config = dict(attrs.get("Config") or {})
+        labels = config.get("Labels")
+        registrations = discover_registrations_from_container_labels(labels)
+        for item in registrations:
+            out.append(item)
+    return out
+
+
+def sync_discovered_registrations(*, db_path: str, registrations: list[dict[str, Any]]) -> int:
+    applied = 0
+    for item in registrations:
+        upsert_registration(
+            db_path=db_path,
+            volume_name=str(item["volume_name"]),
+            path=str(item["path"]),
+            algorithm=str(item["algorithm"]),
+            params=dict(item.get("params") or {}),
+            description=str(item["description"]) if item.get("description") is not None else None,
+        )
+        applied += 1
+    return applied

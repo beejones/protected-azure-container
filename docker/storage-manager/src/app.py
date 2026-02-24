@@ -4,6 +4,7 @@ import os
 from flask import Flask
 
 from .api import create_api_blueprint
+from .discovery import discover_registrations_from_containers, sync_discovered_registrations
 from .models import init_db
 from .scheduler import StorageScheduler
 
@@ -18,6 +19,15 @@ def create_app() -> Flask:
     check_interval_seconds = int(str(os.getenv("SM_CHECK_INTERVAL_SECONDS", "300")))
 
     init_db(db_path)
+
+    try:
+        discovered = discover_registrations_from_containers()
+        sync_discovered_registrations(db_path=db_path, registrations=discovered)
+    except Exception:
+        logging.getLogger("storage_manager").warning(
+            "Failed to auto-discover storage registrations from docker labels",
+            exc_info=True,
+        )
 
     scheduler = StorageScheduler(db_path=db_path, check_interval_seconds=check_interval_seconds)
     scheduler.start()
