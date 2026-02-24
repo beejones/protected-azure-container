@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from urllib.parse import unquote
+from pathlib import Path
 
 import docker
 from flask import Blueprint, jsonify, request
@@ -49,6 +50,58 @@ def _list_docker_volumes() -> dict[str, dict]:
             }
     except Exception:
         return {}
+    return out
+
+
+def _safe_volume_size_bytes(volume: dict) -> int:
+    mountpoint = str(volume.get("mountpoint") or "")
+    if not mountpoint:
+        return 0
+    root = Path(mountpoint)
+    try:
+        if not root.exists():
+            return 0
+        if root.is_file():
+            return int(root.stat().st_size)
+
+        total = 0
+        for item in root.rglob("*"):
+            if item.is_file():
+                total += int(item.stat().st_size)
+        return total
+    except (PermissionError, OSError):
+        return 0
+
+
+def _apply_volumes_filters_and_sort(*, volumes: list[dict]) -> list[dict]:
+    name_filter = str(request.args.get("name") or "").strip().lower()
+    registered_filter = str(request.args.get("registered") or "").strip().lower()
+    sort_key = str(request.args.get("sort") or "volume_name").strip().lower()
+
+    out = list(volumes)
+
+    if name_filter:
+        out = [
+            item
+            for item in out
+            if name_filter in str(item.get("volume_name") or "").lower()
+        ]
+
+    if registered_filter == "true":
+        out = [item for item in out if bool(item.get("registrations"))]
+    elif registered_filter == "false":
+        out = [item for item in out if not bool(item.get("registrations"))]
+
+    for item in out:
+        item["current_bytes"] = _safe_volume_size_bytes(item)
+
+    if sort_key == "current_bytes":
+        out.sort(key=lambda item: int(item.get("current_bytes") or 0), reverse=True)
+    elif sort_key == "created_at":
+        out.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    else:
+        out.sort(key=lambda item: str(item.get("volume_name") or ""))
+
     return out
 
 
@@ -102,8 +155,7 @@ def create_api_blueprint(*, db_path: str, scheduler: StorageScheduler) -> Bluepr
             if "registrations" not in item:
                 item["registrations"] = []
 
-        values = list(docker_volumes.values())
-        values.sort(key=lambda item: str(item.get("volume_name") or ""))
+        values = _apply_volumes_filters_and_sort(volumes=list(docker_volumes.values()))
         return jsonify(values), 200
 
     @blueprint.get("/health")
