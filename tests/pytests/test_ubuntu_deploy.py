@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from scripts.deploy.ubuntu_deploy import (
+    _coerce_label_value,
     build_compose_config_cmd,
     build_docker_build_cmd,
     build_docker_push_cmd,
@@ -352,3 +353,13 @@ def test_register_storage_manager_registrations_raises_on_http_error(monkeypatch
         assert False, "expected SystemExit"
     except SystemExit as exc:
         assert "Storage registration failed" in str(exc)
+
+
+def test_coerce_label_value_scalar_and_non_scalar_behavior():
+    assert _coerce_label_value("true") is True
+    assert _coerce_label_value("14") == 14
+    assert _coerce_label_value("3.14") == 3.14
+    assert _coerce_label_value("null") is None
+
+    assert _coerce_label_value("[1, 2, 3]") == "[1, 2, 3]"
+    assert _coerce_label_value("{a: 1}") == "{a: 1}"
