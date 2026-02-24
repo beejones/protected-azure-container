@@ -36,7 +36,9 @@ import portainer_helpers
 ENV_PUBLIC_DOMAIN = "PUBLIC_DOMAIN"
 ENV_WEB_PORT = "WEB_PORT"
 ENV_APP_IMAGE = "APP_IMAGE"
+ENV_STORAGE_MANAGER_IMAGE = "STORAGE_MANAGER_IMAGE"
 ENV_DOCKERFILE = "DOCKERFILE"
+ENV_STORAGE_MANAGER_DOCKERFILE = "STORAGE_MANAGER_DOCKERFILE"
 ENV_GHCR_USERNAME = "GHCR_USERNAME"
 ENV_GHCR_TOKEN = "GHCR_TOKEN"
 ENV_UBUNTU_SSH_HOST = "UBUNTU_SSH_HOST"
@@ -180,6 +182,50 @@ def prepare_stack_content_for_portainer(*, stack_content: str, app_image: str) -
         )
 
     return yaml.safe_dump(payload, sort_keys=False)
+
+
+def extract_stack_images(*, stack_content: str) -> list[str]:
+    payload = yaml.safe_load(stack_content)
+    if not isinstance(payload, dict):
+        return []
+
+    services = payload.get("services")
+    if not isinstance(services, dict):
+        return []
+
+    images: list[str] = []
+    for service_payload in services.values():
+        if not isinstance(service_payload, dict):
+            continue
+        image = str(service_payload.get("image") or "").strip()
+        if image:
+            images.append(image)
+    return images
+
+
+def ghcr_images_from_stack(*, stack_content: str) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for image in extract_stack_images(stack_content=stack_content):
+        if not image.startswith("ghcr.io/"):
+            continue
+        if image in seen:
+            continue
+        seen.add(image)
+        out.append(image)
+    return out
+
+
+def stack_has_service(*, stack_content: str, service_name: str) -> bool:
+    payload = yaml.safe_load(stack_content)
+    if not isinstance(payload, dict):
+        return False
+
+    services = payload.get("services")
+    if not isinstance(services, dict):
+        return False
+
+    return service_name in services
 
 
 
@@ -573,11 +619,23 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if not resolved_app_image:
         resolved_app_image = read_deploy_key(repo_root=repo_root, key=ENV_APP_IMAGE)
 
+    resolved_storage_manager_image = str(os.getenv(ENV_STORAGE_MANAGER_IMAGE) or "").strip()
+    if not resolved_storage_manager_image:
+        resolved_storage_manager_image = read_deploy_key(repo_root=repo_root, key=ENV_STORAGE_MANAGER_IMAGE)
+    if not resolved_storage_manager_image:
+        resolved_storage_manager_image = "ghcr.io/beejones/protected-container-storage-manager:latest"
+
     resolved_dockerfile = str(os.getenv(ENV_DOCKERFILE) or "").strip()
     if not resolved_dockerfile:
         resolved_dockerfile = read_deploy_key(repo_root=repo_root, key=ENV_DOCKERFILE)
     if not resolved_dockerfile:
         resolved_dockerfile = "docker/Dockerfile"
+
+    resolved_storage_manager_dockerfile = str(os.getenv(ENV_STORAGE_MANAGER_DOCKERFILE) or "").strip()
+    if not resolved_storage_manager_dockerfile:
+        resolved_storage_manager_dockerfile = read_deploy_key(repo_root=repo_root, key=ENV_STORAGE_MANAGER_DOCKERFILE)
+    if not resolved_storage_manager_dockerfile:
+        resolved_storage_manager_dockerfile = "docker/storage-manager/Dockerfile"
 
     resolved_build_push_enabled = not bool(args.skip_build_push)
     if resolved_build_push_enabled:
@@ -657,10 +715,11 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if resolved_build_push_enabled:
         if not resolved_app_image:
             raise SystemExit("APP_IMAGE is required when build/push is enabled")
-        if resolved_app_image.startswith("ghcr.io/"):
+        needs_ghcr_auth = resolved_app_image.startswith("ghcr.io/") or resolved_storage_manager_image.startswith("ghcr.io/")
+        if needs_ghcr_auth:
             if not resolved_ghcr_username or not resolved_ghcr_token:
                 raise SystemExit(
-                    "GHCR_USERNAME and GHCR_TOKEN are required to build/push APP_IMAGE to ghcr.io. "
+                    "GHCR_USERNAME and GHCR_TOKEN are required to build/push GHCR images. "
                     "Set them in .env.deploy/.env.deploy.secrets or use --skip-build-push."
                 )
             log_step("Logging into GHCR for local build/push", icon="🔐")
@@ -671,6 +730,13 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             repo_root=repo_root,
             app_image=resolved_app_image,
             dockerfile=resolved_dockerfile,
+        )
+
+        log_step("Building and pushing STORAGE_MANAGER_IMAGE locally", icon="🏗️")
+        build_and_push_local_image(
+            repo_root=repo_root,
+            app_image=resolved_storage_manager_image,
+            dockerfile=resolved_storage_manager_dockerfile,
         )
 
     has_portainer_api_auth = bool(resolved_portainer_access_token)
@@ -704,6 +770,17 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         stack_content=stack_file_content_remote,
         app_image=resolved_app_image,
     )
+    stack_includes_storage_manager = stack_has_service(
+        stack_content=stack_file_content,
+        service_name="storage-manager",
+    )
+    ghcr_images_in_stack = ghcr_images_from_stack(stack_content=stack_file_content)
+    if ghcr_images_in_stack and (not resolved_ghcr_username or not resolved_ghcr_token):
+        raise SystemExit(
+            "GHCR_USERNAME and GHCR_TOKEN are required for GHCR images in the Portainer stack. "
+            f"Detected GHCR images: {ghcr_images_in_stack}. "
+            "Set GHCR_USERNAME in .env.deploy and GHCR_TOKEN in .env.deploy.secrets."
+        )
     storage_registrations = collect_storage_manager_registrations(stack_content=stack_file_content)
 
     hook_public_domain = str(os.getenv(ENV_PUBLIC_DOMAIN) or "").strip()
@@ -806,19 +883,20 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         action="Failed to ensure Portainer is running on the remote host",
     )
 
-    if resolved_app_image and resolved_app_image.startswith("ghcr.io/") and resolved_ghcr_username and resolved_ghcr_token:
-        log_step("Logging into GHCR and pre-pulling APP_IMAGE on remote host", icon="🔐")
-        _run(
-            build_ssh_cmd(
-                host=resolved_host,
-                remote_command=ghcr_login_pull_remote_cmd(
-                    image=resolved_app_image,
-                    username=resolved_ghcr_username,
-                    token=resolved_ghcr_token,
+    if ghcr_images_in_stack and resolved_ghcr_username and resolved_ghcr_token:
+        for image in ghcr_images_in_stack:
+            log_step(f"Logging into GHCR and pre-pulling {image} on remote host", icon="🔐")
+            _run(
+                build_ssh_cmd(
+                    host=resolved_host,
+                    remote_command=ghcr_login_pull_remote_cmd(
+                        image=image,
+                        username=resolved_ghcr_username,
+                        token=resolved_ghcr_token,
+                    ),
                 ),
-            ),
-            action="Failed remote GHCR login/pull for APP_IMAGE",
-        )
+                action=f"Failed remote GHCR login/pull for image {image}",
+            )
 
     log_step("Ensuring Central Caddy Proxy is running", icon="🌐")
     # Check if the global proxy container exists
@@ -930,10 +1008,16 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                     registrations=storage_registrations,
                 )
             else:
-                log_info(
-                    "Storage-manager labels were detected but STORAGE_MANAGER_API_URL is not set; skipping registration.",
-                    icon="⚠️",
-                )
+                if stack_includes_storage_manager:
+                    log_info(
+                        "Storage-manager labels detected; STORAGE_MANAGER_API_URL not set. Registration remains active via storage-manager Docker label auto-discovery (no action required).",
+                        icon="ℹ️",
+                    )
+                else:
+                    log_info(
+                        "Storage-manager labels were detected but STORAGE_MANAGER_API_URL is not set; skipping registration.",
+                        icon="⚠️",
+                    )
         else:
             log_info("Default storage registration disabled by deploy hook.", icon="🪝")
 

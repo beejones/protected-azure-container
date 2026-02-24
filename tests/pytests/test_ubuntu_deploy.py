@@ -9,10 +9,13 @@ from scripts.deploy.ubuntu_deploy import (
     build_ssh_connectivity_cmd,
     build_ssh_cmd,
     collect_storage_manager_registrations,
+    extract_stack_images,
+    ghcr_images_from_stack,
     parse_boolish,
     prepare_stack_content_for_portainer,
     register_storage_manager_registrations,
     rewrite_rendered_paths_for_remote,
+    stack_has_service,
     read_deploy_key,
     read_deploy_secret_key,
     read_dotenv_key,
@@ -363,3 +366,52 @@ def test_coerce_label_value_scalar_and_non_scalar_behavior():
 
     assert _coerce_label_value("[1, 2, 3]") == "[1, 2, 3]"
     assert _coerce_label_value("{a: 1}") == "{a: 1}"
+
+
+def test_extract_stack_images_reads_all_service_images():
+        stack_content = """
+services:
+    app:
+        image: ghcr.io/beejones/protected-container:latest
+    caddy:
+        image: caddy:2-alpine
+    worker:
+        image: busybox:latest
+"""
+        out = extract_stack_images(stack_content=stack_content)
+        assert out == [
+                "ghcr.io/beejones/protected-container:latest",
+                "caddy:2-alpine",
+                "busybox:latest",
+        ]
+
+
+def test_ghcr_images_from_stack_filters_and_deduplicates():
+        stack_content = """
+services:
+    app:
+        image: ghcr.io/beejones/protected-container:latest
+    storage-manager:
+        image: ghcr.io/beejones/protected-container-storage-manager:latest
+    app-copy:
+        image: ghcr.io/beejones/protected-container:latest
+    caddy:
+        image: caddy:2-alpine
+"""
+        out = ghcr_images_from_stack(stack_content=stack_content)
+        assert out == [
+                "ghcr.io/beejones/protected-container:latest",
+                "ghcr.io/beejones/protected-container-storage-manager:latest",
+        ]
+
+
+def test_stack_has_service_detects_present_and_missing_service():
+        stack_content = """
+services:
+    app:
+        image: ghcr.io/beejones/protected-container:latest
+    storage-manager:
+        image: ghcr.io/beejones/protected-container-storage-manager:latest
+"""
+        assert stack_has_service(stack_content=stack_content, service_name="storage-manager") is True
+        assert stack_has_service(stack_content=stack_content, service_name="missing") is False
