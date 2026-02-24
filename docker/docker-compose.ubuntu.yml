@@ -6,7 +6,7 @@ services:
       storage-manager.0.volume: "${COMPOSE_PROJECT_NAME:-docker}_logs"
       storage-manager.0.path: "/"
       storage-manager.0.algorithm: "remove_before_date"
-      storage-manager.0.max_age_days: "2"
+      storage-manager.0.max_age_days: "1"
       storage-manager.0.description: "Rotate code-server logs, keep last 2 days"
     environment:
       ENV_DIR: ${ENV_DIR:-/opt/app}
