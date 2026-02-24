@@ -2,6 +2,12 @@ services:
   app:
     entrypoint: ["/usr/local/bin/ubuntu_start.sh"]
     command: ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+    labels:
+      storage-manager.0.volume: "protected-container_logs"
+      storage-manager.0.path: "/"
+      storage-manager.0.algorithm: "remove_before_date"
+      storage-manager.0.max_age_days: "2"
+      storage-manager.0.description: "Rotate code-server logs, keep last 14 days"
     environment:
       ENV_DIR: ${ENV_DIR:-/opt/app}
     volumes:

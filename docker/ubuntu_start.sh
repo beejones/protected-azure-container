@@ -22,5 +22,9 @@ for f in "$ENV_DIR/.env" "$ENV_DIR/.env.secrets"; do
     fi
 done
 
+mkdir -p /app/logs
+export LOG_DATE
+LOG_DATE="$(date +%Y-%m-%d)"
+
 echo "[ubuntu_start] Starting application..."
 exec "$@"
