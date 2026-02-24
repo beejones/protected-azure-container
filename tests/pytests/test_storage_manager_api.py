@@ -268,3 +268,62 @@ def test_volumes_query_sort_current_bytes_and_created_at(tmp_path: Path, monkeyp
     assert response_created.status_code == 200
     payload_created = response_created.get_json()
     assert payload_created[0]["volume_name"] == "big-volume"
+
+
+def test_volumes_preserves_docker_reported_current_bytes_and_containers(tmp_path: Path, monkeypatch) -> None:
+    db_path = str(tmp_path / "storage_manager.db")
+    models.init_db(db_path)
+
+    monkeypatch.setattr(
+        api,
+        "_list_docker_volumes",
+        lambda: {
+            "protected-container_logs": {
+                "volume_name": "protected-container_logs",
+                "driver": "local",
+                "created_at": "2026-01-01T00:00:00Z",
+                "mountpoint": None,
+                "containers": ["protected-container"],
+                "current_bytes": 4096,
+            }
+        },
+    )
+
+    client = _build_test_client(db_path=db_path)
+    response = client.get("/api/volumes")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload) == 1
+    assert payload[0]["containers"] == ["protected-container"]
+    assert payload[0]["current_bytes"] == 4096
+
+
+def test_volumes_falls_back_to_filesystem_size_when_docker_reports_zero(tmp_path: Path, monkeypatch) -> None:
+    db_path = str(tmp_path / "storage_manager.db")
+    models.init_db(db_path)
+
+    volume_dir = tmp_path / "docker_logs"
+    volume_dir.mkdir(parents=True, exist_ok=True)
+    (volume_dir / "app.log").write_bytes(b"x" * 128)
+
+    monkeypatch.setattr(
+        api,
+        "_list_docker_volumes",
+        lambda: {
+            "docker_logs": {
+                "volume_name": "docker_logs",
+                "driver": "local",
+                "created_at": "2026-01-01T00:00:00Z",
+                "mountpoint": str(volume_dir),
+                "containers": ["protected-container"],
+                "current_bytes": 0,
+            }
+        },
+    )
+
+    client = _build_test_client(db_path=db_path)
+    response = client.get("/api/volumes")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload) == 1
+    assert payload[0]["current_bytes"] == 128

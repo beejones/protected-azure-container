@@ -51,22 +51,46 @@ def _list_docker_volumes() -> dict[str, dict]:
         client = _get_docker_client()
         for volume in client.volumes.list():
             attrs = dict(volume.attrs or {})
+            usage_data = attrs.get("UsageData") if isinstance(attrs.get("UsageData"), dict) else {}
             out[str(volume.name)] = {
                 "volume_name": str(volume.name),
                 "driver": str(attrs.get("Driver") or "local"),
                 "created_at": attrs.get("CreatedAt"),
                 "mountpoint": attrs.get("Mountpoint"),
                 "containers": [],
+                "current_bytes": int(usage_data.get("Size") or 0),
             }
+
+        # Build reverse mapping: volume -> attached container names
+        for container in client.containers.list(all=True):
+            attrs = dict(container.attrs or {})
+            mounts = attrs.get("Mounts")
+            if not isinstance(mounts, list):
+                continue
+            for mount in mounts:
+                if not isinstance(mount, dict):
+                    continue
+                if str(mount.get("Type") or "").lower() != "volume":
+                    continue
+                volume_name = str(mount.get("Name") or "").strip()
+                if not volume_name or volume_name not in out:
+                    continue
+                container_name = str(container.name or "").strip()
+                if container_name and container_name not in out[volume_name]["containers"]:
+                    out[volume_name]["containers"].append(container_name)
     except Exception:
         return {}
     return out
 
 
 def _safe_volume_size_bytes(volume: dict) -> int:
+    precomputed = volume.get("current_bytes")
+    if isinstance(precomputed, int) and precomputed > 0:
+        return precomputed
+
     mountpoint = str(volume.get("mountpoint") or "")
     if not mountpoint:
-        return 0
+        return precomputed if isinstance(precomputed, int) and precomputed >= 0 else 0
     root = Path(mountpoint)
     try:
         if not root.exists():
