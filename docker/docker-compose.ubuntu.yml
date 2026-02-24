@@ -13,3 +13,23 @@ services:
     volumes:
       # Host-synced env directory (contains .env and optionally .env.secrets)
       - ${ENV_DIR:-/opt/app}:${ENV_DIR:-/opt/app}:ro
+
+  storage-manager:
+    image: ${STORAGE_MANAGER_IMAGE:-ghcr.io/beejones/protected-container-storage-manager:latest}
+    container_name: storage-manager
+    restart: unless-stopped
+    environment:
+      SM_CHECK_INTERVAL_SECONDS: ${SM_CHECK_INTERVAL_SECONDS:-300}
+      SM_LOG_LEVEL: ${SM_LOG_LEVEL:-INFO}
+      SM_DB_PATH: ${SM_DB_PATH:-/data/storage_manager.db}
+      SM_API_PORT: ${SM_API_PORT:-9100}
+    volumes:
+      - sm_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    expose:
+      - "9100"
+    networks:
+      - caddy
+
+volumes:
+  sm_data:
