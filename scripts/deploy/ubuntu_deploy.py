@@ -29,6 +29,7 @@ import yaml
 sys.path.append(str(Path(__file__).parent))
 
 import caddy_register
+import deploy_hooks
 import portainer_helpers
 
 
@@ -52,6 +53,8 @@ ENV_PORTAINER_STACK_NAME = "PORTAINER_STACK_NAME"
 ENV_PORTAINER_ENDPOINT_ID = "PORTAINER_ENDPOINT_ID"
 ENV_CADDY_PROXY_DIR = "CADDY_PROXY_DIR"
 ENV_STORAGE_MANAGER_API_URL = "STORAGE_MANAGER_API_URL"
+ENV_DEPLOY_HOOKS_MODULE = "DEPLOY_HOOKS_MODULE"
+ENV_DEPLOY_HOOKS_SOFT_FAIL = "DEPLOY_HOOKS_SOFT_FAIL"
 
 
 _STORAGE_MANAGER_LABEL_PATTERN = re.compile(r"^storage-manager\.(\d+)\.(.+)$")
@@ -381,6 +384,49 @@ def register_storage_manager_registrations(
             )
 
 
+def _build_ubuntu_deploy_hook_plan(
+    *,
+    stack_name: str,
+    public_domain: str,
+    app_image: str,
+    web_port: str,
+    compose_files: list[str],
+    storage_manager_api_url: str,
+    storage_registrations: list[dict[str, Any]],
+) -> deploy_hooks.DeployPlan:
+    parsed_web_port = int(str(web_port or "3000"))
+    return deploy_hooks.DeployPlan(
+        name=stack_name,
+        location="ubuntu",
+        dns_label=public_domain,
+        deploy_mode="ubuntu",
+        compose_service_name="app",
+        deploy_role="app",
+        app_image=app_image,
+        caddy_image="",
+        other_image=None,
+        app_cpu=0.0,
+        app_memory=0.0,
+        caddy_cpu=0.0,
+        caddy_memory=0.0,
+        other_cpu=0.0,
+        other_memory=0.0,
+        public_domain=public_domain,
+        app_port=parsed_web_port,
+        app_ports=[parsed_web_port],
+        web_command=None,
+        extra_env={},
+        service_mode="app",
+        ftp_passive_range=None,
+        extra_metadata={
+            "compose_files": list(compose_files),
+            "storage_manager_api_url": storage_manager_api_url,
+            "storage_registrations": list(storage_registrations),
+            "enable_default_storage_registration": True,
+        },
+    )
+
+
 def main(argv: list[str] | None = None, repo_root_override: Path | None = None) -> None:
     parser = argparse.ArgumentParser(description="Deploy to Ubuntu server via Portainer stack webhook")
     parser.add_argument(
@@ -442,6 +488,22 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         help="Skip default local docker build+push before deployment",
     )
     parser.add_argument(
+        "--hooks-module",
+        default=None,
+        help=(
+            "Optional hooks module path or import path for ubuntu deploy customizations. "
+            "Resolution: CLI -> DEPLOY_HOOKS_MODULE env var -> default scripts/deploy/deploy_customizations.py"
+        ),
+    )
+    parser.add_argument(
+        "--hooks-soft-fail",
+        action="store_true",
+        help=(
+            "When set, hook failures are logged and deployment continues. "
+            "Resolution precedence: CLI flag, else DEPLOY_HOOKS_SOFT_FAIL env var."
+        ),
+    )
+    parser.add_argument(
         "--storage-manager-api-url",
         default=None,
         help=(
@@ -465,6 +527,18 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         print(f"[ubuntu-deploy] {icon} {message}")
 
     repo_root = repo_root_override or Path(__file__).resolve().parents[2]
+    resolved_hooks_module = str(args.hooks_module or "").strip() or str(os.getenv(ENV_DEPLOY_HOOKS_MODULE) or "").strip() or None
+    resolved_hooks_soft_fail = bool(args.hooks_soft_fail)
+    if not resolved_hooks_soft_fail:
+        resolved_hooks_soft_fail = parse_boolish(str(os.getenv(ENV_DEPLOY_HOOKS_SOFT_FAIL) or "").strip(), default=False)
+
+    hooks = deploy_hooks.load_hooks(
+        repo_root=repo_root,
+        module_path=resolved_hooks_module,
+        soft_fail=resolved_hooks_soft_fail,
+    )
+    hook_ctx = deploy_hooks.DeployContext(repo_root=repo_root, env=os.environ, args=args)
+    hooks.call("pre_validate_env", hook_ctx)
 
     resolved_host = str(args.host or "").strip()
     if not resolved_host:
@@ -564,6 +638,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if not resolved_storage_manager_api_url:
         resolved_storage_manager_api_url = read_deploy_key(repo_root=repo_root, key=ENV_STORAGE_MANAGER_API_URL)
 
+    hooks.call("post_validate_env", hook_ctx)
+
     resolved_ghcr_username = str(os.getenv(ENV_GHCR_USERNAME) or "").strip()
     if not resolved_ghcr_username:
         resolved_ghcr_username = read_deploy_key(repo_root=repo_root, key=ENV_GHCR_USERNAME)
@@ -623,6 +699,34 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         app_image=resolved_app_image,
     )
     storage_registrations = collect_storage_manager_registrations(stack_content=stack_file_content)
+
+    hook_public_domain = str(os.getenv(ENV_PUBLIC_DOMAIN) or "").strip()
+    if not hook_public_domain:
+        hook_public_domain = read_deploy_key(repo_root=repo_root, key=ENV_PUBLIC_DOMAIN)
+
+    hook_web_port = str(os.getenv(ENV_WEB_PORT) or "").strip()
+    if not hook_web_port:
+        hook_web_port = read_deploy_key(repo_root=repo_root, key=ENV_WEB_PORT)
+    if not hook_web_port:
+        hook_web_port = "3000"
+
+    hook_plan = _build_ubuntu_deploy_hook_plan(
+        stack_name=resolved_portainer_stack_name,
+        public_domain=hook_public_domain,
+        app_image=resolved_app_image,
+        web_port=hook_web_port,
+        compose_files=compose_files,
+        storage_manager_api_url=resolved_storage_manager_api_url,
+        storage_registrations=storage_registrations,
+    )
+    hooks.call("build_deploy_plan", hook_ctx, hook_plan)
+
+    hook_storage_api_url = str(hook_plan.extra_metadata.get("storage_manager_api_url") or "").strip()
+    hook_storage_registrations_raw = hook_plan.extra_metadata.get("storage_registrations")
+    if isinstance(hook_storage_registrations_raw, list):
+        storage_registrations = [item for item in hook_storage_registrations_raw if isinstance(item, dict)]
+    resolved_storage_manager_api_url = hook_storage_api_url or resolved_storage_manager_api_url
+    default_storage_registration_enabled = bool(hook_plan.extra_metadata.get("enable_default_storage_registration", True))
 
     log_step("Prepared deployment plan", icon="🧭")
     log_info(f"Target: {resolved_host}")
@@ -767,19 +871,6 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             has_api_auth=has_portainer_api_auth,
         )
 
-    if storage_registrations:
-        if resolved_storage_manager_api_url:
-            log_step("Registering storage-manager labels via API", icon="🧹")
-            register_storage_manager_registrations(
-                api_url=resolved_storage_manager_api_url,
-                registrations=storage_registrations,
-            )
-        else:
-            log_info(
-                "Storage-manager labels were detected but STORAGE_MANAGER_API_URL is not set; skipping registration.",
-                icon="⚠️",
-            )
-
     # --- Post-deploy: register with centralized Caddy proxy ----------------
     resolved_public_domain = str(os.getenv(ENV_PUBLIC_DOMAIN) or "").strip()
     if not resolved_public_domain:
@@ -823,6 +914,33 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             )
     else:
         log_info("PUBLIC_DOMAIN not set — skipping Caddy registration.", icon="⚠️")
+
+    if storage_registrations:
+        if default_storage_registration_enabled:
+            if resolved_storage_manager_api_url:
+                log_step("Registering storage-manager labels via API", icon="🧹")
+                register_storage_manager_registrations(
+                    api_url=resolved_storage_manager_api_url,
+                    registrations=storage_registrations,
+                )
+            else:
+                log_info(
+                    "Storage-manager labels were detected but STORAGE_MANAGER_API_URL is not set; skipping registration.",
+                    icon="⚠️",
+                )
+        else:
+            log_info("Default storage registration disabled by deploy hook.", icon="🪝")
+
+    hooks.call(
+        "post_deploy",
+        hook_ctx,
+        hook_plan,
+        {
+            "storage_registration_count": len(storage_registrations),
+            "storage_manager_api_url": resolved_storage_manager_api_url,
+            "default_storage_registration_enabled": default_storage_registration_enabled,
+        },
+    )
 
     print("[ubuntu-deploy] ✅ Done.")
 
