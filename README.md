@@ -21,6 +21,24 @@ This approach is ideal for self-hosters and small enterprises who want full cont
 
 Start here: [Ubuntu Server Deployment](docs/deploy/UBUNTU_SERVER.md)
 
+## Storage Manager
+
+Containers that produce data over time (camera footage, logs, exports) can fill up Docker volumes silently. The **Storage Manager** is a lightweight sidecar service that runs in the central proxy stack and keeps volumes under control automatically.
+
+- **Self-service registration** — app containers register volumes to monitor via a REST API (`POST /api/register`) or via Docker Compose labels. No manual intervention or cron jobs required.
+- **Pluggable cleanup algorithms** — choose the strategy that fits each volume:
+
+  | Algorithm | What it does |
+  |-----------|-------------|
+  | **Max Size** | Deletes oldest (or largest) files until total size is within the configured limit. |
+  | **Remove Before Date** | Removes all files older than a fixed date or a rolling age window (e.g. 30 days). |
+  | **Keep N Latest** | Retains only the N most recent files and removes the rest. |
+
+- **Observable** — exposes `/api/health` and `/api/volumes` endpoints for Portainer dashboards and alerting.
+- **Persistent** — registrations are stored in SQLite so they survive container restarts.
+
+Start here: [Storage Manager](docs/deploy/STORAGE_MANAGER.md) · Planning: [planning/STORAGE_MANAGER.md](planning/STORAGE_MANAGER.md)
+
 ## Azure Container Instances
 
 For teams already invested in Azure, the repo includes a parallel deploy path targeting Azure Container Instances (ACI):
@@ -105,6 +123,7 @@ Internet → Caddy (443) → [Basic Auth] → code-server (8080)
 - [Env Schema](docs/deploy/ENV_SCHEMA.md) - How to add vars/secrets to the schema
 - [Add Your App](docs/deploy/ADD_YOUR_APP.md) - How to bundle and run your own app in this container
 - [Shared Caddy Routing](docs/deploy/SHARED_CADDY_ROUTING.md) - Register other containers with the centralized Caddy proxy
+- [Storage Manager](docs/deploy/STORAGE_MANAGER.md) - Automated volume cleanup for app containers
 
 ## Use This Repo As A Template
 

@@ -21,6 +21,7 @@
 - **Cleanup**: Delete obsolete code immediately.
 - **Permissions**: You have permission to run tests without asking.
 
+
 # Project Context
 
 ## 1. Project Overview

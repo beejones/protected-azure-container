@@ -18,8 +18,8 @@ Build a world-class protected container setup extracted, featuring:
 graph TB
     subgraph "Azure Container Instances"
         subgraph "Container Group"
-            Caddy["Caddy TLS Proxy<br/>:80, :443"]
-            App["code-server Container<br/>:8080"]
+            Caddy["Caddy TLS Proxy :80, :443"]
+            App["code-server Container :8080"]
         end
     end
     
@@ -27,8 +27,8 @@ graph TB
     Caddy -->|"/* → code-server"| App
     
     subgraph "Azure Services"
-        KV["Key Vault<br/>(secrets)"]
-        Files["Azure Files<br/>(workspace, config)"]
+        KV["Key Vault (secrets)"]
+        Files["Azure Files (workspace, config)"]
         MI["Managed Identity"]
     end
     
