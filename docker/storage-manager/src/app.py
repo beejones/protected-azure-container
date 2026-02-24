@@ -25,7 +25,7 @@ def create_app() -> Flask:
         sync_discovered_registrations(db_path=db_path, registrations=discovered)
     except Exception:
         logging.getLogger("storage_manager").warning(
-            "Failed to auto-discover storage registrations from docker labels",
+            "[STORAGE]: Failed to auto-discover storage registrations from docker labels",
             exc_info=True,
         )
 

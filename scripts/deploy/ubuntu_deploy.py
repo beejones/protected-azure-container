@@ -274,6 +274,12 @@ def _normalize_compose_labels(labels: Any) -> dict[str, str]:
 
 
 def _coerce_label_value(value: Any) -> Any:
+    """Coerce compose label values into scalar Python types.
+
+    Values are parsed with ``yaml.safe_load`` to support convenient label syntax
+    such as ``"14" -> 14`` and ``"true" -> True`` for algorithm params.
+    Non-scalar YAML values fall back to the original string input.
+    """
     if not isinstance(value, str):
         return value
     parsed = yaml.safe_load(value)

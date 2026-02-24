@@ -1,34 +1,27 @@
-from pathlib import Path
-
 from .base import CleanupAlgorithm, CleanupResult
+from .utils import iter_files, validate_sort_by
 
 
-def _iter_files(target_path: str) -> list[Path]:
-    root = Path(target_path)
-    if root.is_file():
-        return [root]
-    if not root.exists():
-        return []
-    return [item for item in root.rglob("*") if item.is_file()]
-
-
-def _total_size(files: list[Path]) -> int:
+def _total_size(files: list) -> int:
     return sum(int(item.stat().st_size) for item in files if item.exists())
 
 
 class MaxSizeAlgorithm(CleanupAlgorithm):
     def should_clean(self, target_path: str, params: dict) -> bool:
-        files = _iter_files(target_path)
         max_bytes = int(params.get("max_bytes") or 0)
-        return _total_size(files) > max_bytes > 0
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be greater than 0")
+        validate_sort_by(str(params.get("sort_by") or "mtime"))
+        files = iter_files(target_path)
+        return _total_size(files) > max_bytes
 
     def clean(self, target_path: str, params: dict) -> CleanupResult:
         max_bytes = int(params.get("max_bytes") or 0)
         if max_bytes <= 0:
             raise ValueError("max_bytes must be greater than 0")
 
-        sort_by = str(params.get("sort_by") or "mtime").lower()
-        files = _iter_files(target_path)
+        sort_by = validate_sort_by(str(params.get("sort_by") or "mtime"))
+        files = iter_files(target_path)
         if not files:
             return CleanupResult(cleaned=False, files_removed=0, bytes_freed=0)
 

@@ -1,16 +1,7 @@
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from .base import CleanupAlgorithm, CleanupResult
-
-
-def _iter_files(target_path: str) -> list[Path]:
-    root = Path(target_path)
-    if root.is_file():
-        return [root]
-    if not root.exists():
-        return []
-    return [item for item in root.rglob("*") if item.is_file()]
+from .utils import iter_files
 
 
 def _parse_threshold(params: dict) -> datetime:
@@ -33,7 +24,7 @@ def _parse_threshold(params: dict) -> datetime:
 class RemoveBeforeDateAlgorithm(CleanupAlgorithm):
     def should_clean(self, target_path: str, params: dict) -> bool:
         threshold = _parse_threshold(params)
-        for file_path in _iter_files(target_path):
+        for file_path in iter_files(target_path):
             modified = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
             if modified < threshold:
                 return True
@@ -44,7 +35,7 @@ class RemoveBeforeDateAlgorithm(CleanupAlgorithm):
         removed_count = 0
         freed = 0
 
-        for file_path in _iter_files(target_path):
+        for file_path in iter_files(target_path):
             modified = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
             if modified < threshold:
                 file_size = int(file_path.stat().st_size)

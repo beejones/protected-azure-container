@@ -88,3 +88,35 @@ def test_keep_n_latest_algorithm_keeps_n_newest(tmp_path: Path) -> None:
     assert first.exists() is False
     assert second.exists() is True
     assert third.exists() is True
+
+
+def test_max_size_should_clean_raises_for_non_positive_max_bytes(tmp_path: Path) -> None:
+    target = tmp_path / "f.log"
+    _write_file(target, 10)
+
+    algo = MaxSizeAlgorithm()
+    try:
+        algo.should_clean(str(tmp_path), {"max_bytes": 0, "sort_by": "mtime"})
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "max_bytes must be greater than 0" in str(exc)
+
+
+def test_algorithms_raise_for_invalid_sort_by(tmp_path: Path) -> None:
+    target = tmp_path / "f.log"
+    _write_file(target, 10)
+
+    max_size_algo = MaxSizeAlgorithm()
+    keep_n_algo = KeepNLatestAlgorithm()
+
+    try:
+        max_size_algo.clean(str(tmp_path), {"max_bytes": 5, "sort_by": "unknown"})
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "Invalid sort_by" in str(exc)
+
+    try:
+        keep_n_algo.clean(str(tmp_path), {"keep_count": 1, "sort_by": "unknown"})
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "Invalid sort_by" in str(exc)

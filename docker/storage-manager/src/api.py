@@ -10,6 +10,16 @@ from .models import delete_registration, list_registrations_by_volume, upsert_re
 from .scheduler import StorageScheduler
 
 
+_DOCKER_CLIENT = None
+
+
+def _get_docker_client():
+    global _DOCKER_CLIENT
+    if _DOCKER_CLIENT is None:
+        _DOCKER_CLIENT = docker.from_env()
+    return _DOCKER_CLIENT
+
+
 def _parse_registration_payload(payload: dict) -> dict:
     volume_name = str(payload.get("volume_name") or "").strip()
     path = str(payload.get("path") or "").strip()
@@ -38,7 +48,7 @@ def _parse_registration_payload(payload: dict) -> dict:
 def _list_docker_volumes() -> dict[str, dict]:
     out: dict[str, dict] = {}
     try:
-        client = docker.from_env()
+        client = _get_docker_client()
         for volume in client.volumes.list():
             attrs = dict(volume.attrs or {})
             out[str(volume.name)] = {

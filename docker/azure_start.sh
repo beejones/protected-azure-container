@@ -48,6 +48,9 @@ fi
 # Ensure workspace directory exists
 mkdir -p /home/coder/workspace
 chown -R coder:coder /home/coder/workspace
+mkdir -p /app/logs
+
+export LOG_DATE="$(date +%Y-%m-%d)"
 
 echo "[azure_start] Starting application..."
 
