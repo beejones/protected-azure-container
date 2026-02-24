@@ -31,8 +31,8 @@ services:
       storage-manager.0.volume: "protected-container_logs"
       storage-manager.0.path: "/"
       storage-manager.0.algorithm: "remove_before_date"
-      storage-manager.0.max_age_days: "14"
-      storage-manager.0.description: "Rotate code-server logs, keep last 14 days"
+      storage-manager.0.max_age_days: "2"
+      storage-manager.0.description: "Rotate code-server logs, keep last 2 days"
 ```
 
 ## Environment variables
