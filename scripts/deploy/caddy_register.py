@@ -218,3 +218,36 @@ def ensure_caddy_registration(
 
     logger.info("%s Registered %s -> %s:%s", LOG_PREFIX, domain, service, port)
     return True
+
+
+def is_domain_registered(
+    *,
+    ssh_host: str,
+    domain: str,
+    caddyfile_path: str,
+    caddy_container: str = DEFAULT_CADDY_CONTAINER,
+) -> bool:
+    """Return True when *domain* is covered by the remote Caddy config.
+
+    Coverage is satisfied when either:
+    - a literal site block exists for ``domain``, or
+    - a ``{$PUBLIC_DOMAIN}`` site block exists and resolves to ``domain``
+      in the running Caddy container environment.
+    """
+    result = _ssh_run(ssh_host, f"cat {shlex.quote(caddyfile_path)}", check=False)
+    if result.returncode != 0:
+        return False
+
+    caddyfile_text = str(result.stdout or "")
+    if _domain_present(caddyfile_text, domain):
+        return True
+
+    if _public_domain_placeholder_present(caddyfile_text):
+        resolved_public_domain = _remote_public_domain(
+            ssh_host=ssh_host,
+            caddy_container=caddy_container,
+        )
+        if resolved_public_domain and resolved_public_domain == domain:
+            return True
+
+    return False
