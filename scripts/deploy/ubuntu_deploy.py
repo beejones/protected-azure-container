@@ -653,6 +653,26 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 port=resolved_web_port,
                 caddyfile_path=caddyfile_path,
             )
+
+            is_registered = caddy_register.is_domain_registered(
+                ssh_host=resolved_host,
+                domain=resolved_public_domain,
+                caddyfile_path=caddyfile_path,
+            )
+            if is_registered:
+                log_info(
+                    f"Caddy registration verified for {resolved_public_domain}.",
+                    icon="✅",
+                )
+            else:
+                log_info(
+                    (
+                        f"Caddy registration could not be verified for {resolved_public_domain}. "
+                        f"Checked Caddyfile: {caddyfile_path}. "
+                        "Deployment continues, but HTTPS routing may be unavailable."
+                    ),
+                    icon="⚠️",
+                )
         except Exception as exc:
             log_info(f"Caddy registration failed: {exc}", icon="⚠️")
             log_info(
