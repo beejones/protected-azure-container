@@ -30,6 +30,10 @@ class StorageScheduler:
     def is_running(self) -> bool:
         return self._running
 
+    @property
+    def docker_client(self):
+        return self._docker_client
+
     def start(self) -> None:
         if self._running:
             return

@@ -3,21 +3,10 @@ from __future__ import annotations
 from urllib.parse import unquote
 from pathlib import Path
 
-import docker
 from flask import Blueprint, jsonify, request
 
 from .models import delete_registration, list_registrations_by_volume, upsert_registration
 from .scheduler import StorageScheduler
-
-
-_DOCKER_CLIENT = None
-
-
-def _get_docker_client():
-    global _DOCKER_CLIENT
-    if _DOCKER_CLIENT is None:
-        _DOCKER_CLIENT = docker.from_env()
-    return _DOCKER_CLIENT
 
 
 def _parse_registration_payload(payload: dict) -> dict:
@@ -45,11 +34,13 @@ def _parse_registration_payload(payload: dict) -> dict:
     }
 
 
-def _list_docker_volumes() -> dict[str, dict]:
+def _list_docker_volumes(*, docker_client=None) -> dict[str, dict]:
     out: dict[str, dict] = {}
     try:
-        client = _get_docker_client()
-        for volume in client.volumes.list():
+        if docker_client is None:
+            return {}
+
+        for volume in docker_client.volumes.list():
             attrs = dict(volume.attrs or {})
             usage_data = attrs.get("UsageData") if isinstance(attrs.get("UsageData"), dict) else {}
             out[str(volume.name)] = {
@@ -62,7 +53,7 @@ def _list_docker_volumes() -> dict[str, dict]:
             }
 
         # Build reverse mapping: volume -> attached container names
-        for container in client.containers.list(all=True):
+        for container in docker_client.containers.list(all=True):
             attrs = dict(container.attrs or {})
             mounts = attrs.get("Mounts")
             if not isinstance(mounts, list):
@@ -139,7 +130,7 @@ def _apply_volumes_filters_and_sort(*, volumes: list[dict]) -> list[dict]:
     return out
 
 
-def create_api_blueprint(*, db_path: str, scheduler: StorageScheduler) -> Blueprint:
+def create_api_blueprint(*, db_path: str, scheduler: StorageScheduler, docker_client=None) -> Blueprint:
     blueprint = Blueprint("storage_manager_api", __name__)
 
     @blueprint.post("/register")
@@ -172,7 +163,10 @@ def create_api_blueprint(*, db_path: str, scheduler: StorageScheduler) -> Bluepr
     @blueprint.get("/volumes")
     def list_volumes() -> tuple:
         registrations_by_volume = list_registrations_by_volume(db_path)
-        docker_volumes = _list_docker_volumes()
+        if docker_client is None:
+            docker_volumes = _list_docker_volumes()
+        else:
+            docker_volumes = _list_docker_volumes(docker_client=docker_client)
 
         for volume_name, registrations in registrations_by_volume.items():
             if volume_name not in docker_volumes:

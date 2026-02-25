@@ -12,8 +12,8 @@ class CleanupResult:
 class CleanupAlgorithm(ABC):
     @abstractmethod
     def should_clean(self, target_path: str, params: dict) -> bool:
-        raise NotImplementedError
+        """Return True when the target path should be cleaned."""
 
     @abstractmethod
     def clean(self, target_path: str, params: dict) -> CleanupResult:
-        raise NotImplementedError
+        """Run cleanup and return details about removed files and bytes."""

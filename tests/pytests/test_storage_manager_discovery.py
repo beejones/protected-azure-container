@@ -68,3 +68,41 @@ def test_sync_discovered_registrations_writes_to_sqlite(tmp_path: Path) -> None:
     assert rows[0]["algorithm"] == "remove_before_date"
     assert rows[0]["params"]["max_age_days"] == "14"
     assert rows[0]["description"] == "keep logs"
+
+
+def test_discover_registrations_from_containers_reads_docker_labels(monkeypatch) -> None:
+    class _Container:
+        def __init__(self, labels: dict[str, str]):
+            self.attrs = {"Config": {"Labels": labels}}
+
+    class _ContainerManager:
+        @staticmethod
+        def list() -> list[_Container]:
+            return [
+                _Container(
+                    {
+                        "storage-manager.0.volume": "protected-container_logs",
+                        "storage-manager.0.path": "/",
+                        "storage-manager.0.algorithm": "remove_before_date",
+                        "storage-manager.0.max_age_days": "1",
+                    }
+                ),
+                _Container({"unrelated": "label"}),
+            ]
+
+    class _DockerClient:
+        containers = _ContainerManager()
+
+    class _DockerModule:
+        @staticmethod
+        def from_env() -> _DockerClient:
+            return _DockerClient()
+
+    monkeypatch.setitem(sys.modules, "docker", _DockerModule())
+
+    out = discovery.discover_registrations_from_containers()
+    assert len(out) == 1
+    assert out[0]["volume_name"] == "protected-container_logs"
+    assert out[0]["path"] == "/"
+    assert out[0]["algorithm"] == "remove_before_date"
+    assert out[0]["params"]["max_age_days"] == "1"

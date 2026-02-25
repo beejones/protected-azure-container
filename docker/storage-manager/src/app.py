@@ -32,7 +32,10 @@ def create_app() -> Flask:
     scheduler = StorageScheduler(db_path=db_path, check_interval_seconds=check_interval_seconds)
     scheduler.start()
 
-    app.register_blueprint(create_api_blueprint(db_path=db_path, scheduler=scheduler), url_prefix="/api")
+    app.register_blueprint(
+        create_api_blueprint(db_path=db_path, scheduler=scheduler, docker_client=scheduler.docker_client),
+        url_prefix="/api",
+    )
     app.extensions["storage_scheduler"] = scheduler
 
     return app
