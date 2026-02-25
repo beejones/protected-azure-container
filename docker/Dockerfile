@@ -37,6 +37,10 @@ RUN chmod +x /usr/local/bin/azure_start.sh
 COPY ubuntu_start.sh /usr/local/bin/ubuntu_start.sh
 RUN chmod +x /usr/local/bin/ubuntu_start.sh
 
+# Copy code-server logging wrapper (daily file rollover by date)
+COPY run_code_server_with_daily_logs.sh /usr/local/bin/run_code_server_with_daily_logs.sh
+RUN chmod +x /usr/local/bin/run_code_server_with_daily_logs.sh
+
 EXPOSE 8080
 
 # Environment defaults

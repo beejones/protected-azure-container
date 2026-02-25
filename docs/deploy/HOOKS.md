@@ -11,6 +11,8 @@ Hooks are Python callback methods that run at specific points in the deployment 
 - Modify the generated Azure Container Instances (ACI) YAML.
 - Run pre-flight or post-deploy tasks.
 
+The same hook mechanism is available for `scripts/deploy/ubuntu_deploy.py`.
+
 ## Configuration
 
 ### Loader Precedence
@@ -32,6 +34,18 @@ By default, hook failures abort the deployment. You can enable "soft-fail" mode 
 
 > [!NOTE]
 > When `soft-fail` is enabled, it also covers **loading failures**. If a hook module exists but fails to import, the loader will log a warning and return a dummy hooks object (no-op) instead of raising an error.
+
+### Ubuntu deploy flags
+
+`ubuntu_deploy.py` supports the same hook controls:
+
+- `--hooks-module <path-or-module>`
+- `--hooks-soft-fail`
+
+and reads the same environment variables:
+
+- `DEPLOY_HOOKS_MODULE`
+- `DEPLOY_HOOKS_SOFT_FAIL`
 
 ## Implementing Hooks
 
@@ -81,6 +95,12 @@ def get_hooks():
 - **Summary**: After parsing arguments and Docker Compose defaults, but before generating YAML.
 - **Use for**: Overriding images, resources, ports, or command. This is the **preferred** place for most customizations.
 
+For `ubuntu_deploy.py`, this hook is also used to customize storage-manager registration behavior through `plan.extra_metadata` keys:
+
+- `storage_manager_api_url` (str): override resolved Storage Manager API URL.
+- `storage_registrations` (list[dict]): override parsed compose-label registrations.
+- `enable_default_storage_registration` (bool, default `True`): disable built-in auto-registration if your hook handles registration itself.
+
 ### `pre_render_yaml(ctx, plan)`
 - **Summary**: Just before the YAML generation function is called.
 
@@ -93,6 +113,12 @@ def get_hooks():
 
 ### `post_deploy(ctx, plan, deploy_result)`
 - **Summary**: After successful deployment.
+
+For `ubuntu_deploy.py`, `deploy_result` includes:
+
+- `storage_registration_count`
+- `storage_manager_api_url`
+- `default_storage_registration_enabled`
 
 ### `on_error(ctx, exc)`
 - **Summary**: If an exception occurs during the deployment lifecycle.

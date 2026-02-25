@@ -1,15 +1,21 @@
 from pathlib import Path
 
 from scripts.deploy.ubuntu_deploy import (
+    _coerce_label_value,
     build_compose_config_cmd,
     build_docker_build_cmd,
     build_docker_push_cmd,
     build_rsync_cmd,
     build_ssh_connectivity_cmd,
     build_ssh_cmd,
+    collect_storage_manager_registrations,
+    extract_stack_images,
+    ghcr_images_from_stack,
     parse_boolish,
     prepare_stack_content_for_portainer,
+    register_storage_manager_registrations,
     rewrite_rendered_paths_for_remote,
+    stack_has_service,
     read_deploy_key,
     read_deploy_secret_key,
     read_dotenv_key,
@@ -217,3 +223,195 @@ def test_rewrite_rendered_paths_for_remote_replaces_local_repo_root():
     )
     assert "/home/ronny/dev/protected-azure-container" not in out
     assert "/home/ronny/containers/protected-container/.env" in out
+
+
+def test_collect_storage_manager_registrations_from_mapping_labels():
+    stack_content = """
+services:
+  app:
+    labels:
+      storage-manager.0.volume: protected-container_logs
+      storage-manager.0.path: /
+      storage-manager.0.algorithm: remove_before_date
+      storage-manager.0.max_age_days: "14"
+      storage-manager.0.description: Keep 14 days
+      storage-manager.1.volume: camera-footage
+      storage-manager.1.path: /recordings
+      storage-manager.1.algorithm: max_size
+      storage-manager.1.max_bytes: "5368709120"
+  worker:
+    labels:
+      other.label: value
+"""
+    out = collect_storage_manager_registrations(stack_content=stack_content)
+    assert len(out) == 2
+
+    first = out[0]
+    assert first["source_service"] == "app"
+    assert first["source_index"] == 0
+    assert first["volume_name"] == "protected-container_logs"
+    assert first["path"] == "/"
+    assert first["algorithm"] == "remove_before_date"
+    assert first["description"] == "Keep 14 days"
+    assert first["params"]["max_age_days"] == 14
+
+    second = out[1]
+    assert second["volume_name"] == "camera-footage"
+    assert second["path"] == "/recordings"
+    assert second["algorithm"] == "max_size"
+    assert second["params"]["max_bytes"] == 5368709120
+
+
+def test_collect_storage_manager_registrations_from_list_labels():
+    stack_content = """
+services:
+  app:
+    labels:
+      - storage-manager.0.volume=protected-container_logs
+      - storage-manager.0.path=/
+      - storage-manager.0.algorithm=remove_before_date
+      - storage-manager.0.max_age_days=7
+"""
+    out = collect_storage_manager_registrations(stack_content=stack_content)
+    assert len(out) == 1
+    assert out[0]["params"]["max_age_days"] == 7
+
+
+def test_collect_storage_manager_registrations_raises_for_missing_required_fields():
+    stack_content = """
+services:
+  app:
+    labels:
+      storage-manager.0.volume: protected-container_logs
+      storage-manager.0.path: /
+"""
+    try:
+        collect_storage_manager_registrations(stack_content=stack_content)
+        assert False, "expected SystemExit"
+    except SystemExit as exc:
+        assert "missing required fields" in str(exc)
+
+
+def test_register_storage_manager_registrations_posts_to_api_endpoint(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class DummyResponse:
+        def __init__(self, status_code: int, text: str = ""):
+            self.status_code = status_code
+            self.text = text
+
+    def fake_post(url, json, timeout):
+        calls.append((url, json))
+        assert timeout == 10
+        return DummyResponse(201)
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.requests.post", fake_post)
+
+    register_storage_manager_registrations(
+        api_url="https://storage.example.com",
+        registrations=[
+            {
+                "volume_name": "protected-container_logs",
+                "path": "/",
+                "algorithm": "remove_before_date",
+                "params": {"max_age_days": 14},
+                "description": "Keep 14 days",
+                "source_service": "app",
+                "source_index": 0,
+            }
+        ],
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0] == "https://storage.example.com/api/register"
+    assert calls[0][1]["volume_name"] == "protected-container_logs"
+    assert calls[0][1]["params"]["max_age_days"] == 14
+
+
+def test_register_storage_manager_registrations_raises_on_http_error(monkeypatch):
+    class DummyResponse:
+        def __init__(self):
+            self.status_code = 500
+            self.text = "boom"
+
+    def fake_post(url, json, timeout):
+        return DummyResponse()
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.requests.post", fake_post)
+
+    try:
+        register_storage_manager_registrations(
+            api_url="https://storage.example.com/api/register",
+            registrations=[
+                {
+                    "volume_name": "protected-container_logs",
+                    "path": "/",
+                    "algorithm": "remove_before_date",
+                    "params": {},
+                    "source_service": "app",
+                    "source_index": 0,
+                }
+            ],
+        )
+        assert False, "expected SystemExit"
+    except SystemExit as exc:
+        assert "Storage registration failed" in str(exc)
+
+
+def test_coerce_label_value_scalar_and_non_scalar_behavior():
+    assert _coerce_label_value("true") is True
+    assert _coerce_label_value("14") == 14
+    assert _coerce_label_value("3.14") == 3.14
+    assert _coerce_label_value("null") is None
+
+    assert _coerce_label_value("[1, 2, 3]") == "[1, 2, 3]"
+    assert _coerce_label_value("{a: 1}") == "{a: 1}"
+
+
+def test_extract_stack_images_reads_all_service_images():
+        stack_content = """
+services:
+    app:
+        image: ghcr.io/beejones/protected-container:latest
+    caddy:
+        image: caddy:2-alpine
+    worker:
+        image: busybox:latest
+"""
+        out = extract_stack_images(stack_content=stack_content)
+        assert out == [
+                "ghcr.io/beejones/protected-container:latest",
+                "caddy:2-alpine",
+                "busybox:latest",
+        ]
+
+
+def test_ghcr_images_from_stack_filters_and_deduplicates():
+        stack_content = """
+services:
+    app:
+        image: ghcr.io/beejones/protected-container:latest
+    storage-manager:
+        image: ghcr.io/beejones/protected-container-storage-manager:latest
+    app-copy:
+        image: ghcr.io/beejones/protected-container:latest
+    caddy:
+        image: caddy:2-alpine
+"""
+        out = ghcr_images_from_stack(stack_content=stack_content)
+        assert out == [
+                "ghcr.io/beejones/protected-container:latest",
+                "ghcr.io/beejones/protected-container-storage-manager:latest",
+        ]
+
+
+def test_stack_has_service_detects_present_and_missing_service():
+        stack_content = """
+services:
+    app:
+        image: ghcr.io/beejones/protected-container:latest
+    storage-manager:
+        image: ghcr.io/beejones/protected-container-storage-manager:latest
+"""
+        assert stack_has_service(stack_content=stack_content, service_name="storage-manager") is True
+        assert stack_has_service(stack_content=stack_content, service_name="missing") is False

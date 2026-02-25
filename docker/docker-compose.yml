@@ -17,6 +17,8 @@ services:
       - ../workspace:/home/coder/workspace
       # Local .env for development (production uses Key Vault)
       - ../.env:/home/coder/.env:ro
+      # Persistent log volume for daily log rotation and storage-manager cleanup
+      - logs:/app/logs
     expose:
       - "8080"
     networks:
@@ -29,3 +31,6 @@ networks:
   caddy:
     external: true
     name: caddy
+
+volumes:
+  logs:

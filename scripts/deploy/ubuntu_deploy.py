@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import requests
 from dotenv import dotenv_values
@@ -27,13 +29,16 @@ import yaml
 sys.path.append(str(Path(__file__).parent))
 
 import caddy_register
+import deploy_hooks
 import portainer_helpers
 
 
 ENV_PUBLIC_DOMAIN = "PUBLIC_DOMAIN"
 ENV_WEB_PORT = "WEB_PORT"
 ENV_APP_IMAGE = "APP_IMAGE"
+ENV_STORAGE_MANAGER_IMAGE = "STORAGE_MANAGER_IMAGE"
 ENV_DOCKERFILE = "DOCKERFILE"
+ENV_STORAGE_MANAGER_DOCKERFILE = "STORAGE_MANAGER_DOCKERFILE"
 ENV_GHCR_USERNAME = "GHCR_USERNAME"
 ENV_GHCR_TOKEN = "GHCR_TOKEN"
 ENV_UBUNTU_SSH_HOST = "UBUNTU_SSH_HOST"
@@ -49,6 +54,12 @@ ENV_PORTAINER_ACCESS_TOKEN = "PORTAINER_ACCESS_TOKEN"
 ENV_PORTAINER_STACK_NAME = "PORTAINER_STACK_NAME"
 ENV_PORTAINER_ENDPOINT_ID = "PORTAINER_ENDPOINT_ID"
 ENV_CADDY_PROXY_DIR = "CADDY_PROXY_DIR"
+ENV_STORAGE_MANAGER_API_URL = "STORAGE_MANAGER_API_URL"
+ENV_DEPLOY_HOOKS_MODULE = "DEPLOY_HOOKS_MODULE"
+ENV_DEPLOY_HOOKS_SOFT_FAIL = "DEPLOY_HOOKS_SOFT_FAIL"
+
+
+_STORAGE_MANAGER_LABEL_PATTERN = re.compile(r"^storage-manager\.(\d+)\.(.+)$")
 
 
 def _subprocess_error_text(exc: subprocess.CalledProcessError) -> str:
@@ -173,6 +184,50 @@ def prepare_stack_content_for_portainer(*, stack_content: str, app_image: str) -
     return yaml.safe_dump(payload, sort_keys=False)
 
 
+def extract_stack_images(*, stack_content: str) -> list[str]:
+    payload = yaml.safe_load(stack_content)
+    if not isinstance(payload, dict):
+        return []
+
+    services = payload.get("services")
+    if not isinstance(services, dict):
+        return []
+
+    images: list[str] = []
+    for service_payload in services.values():
+        if not isinstance(service_payload, dict):
+            continue
+        image = str(service_payload.get("image") or "").strip()
+        if image:
+            images.append(image)
+    return images
+
+
+def ghcr_images_from_stack(*, stack_content: str) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for image in extract_stack_images(stack_content=stack_content):
+        if not image.startswith("ghcr.io/"):
+            continue
+        if image in seen:
+            continue
+        seen.add(image)
+        out.append(image)
+    return out
+
+
+def stack_has_service(*, stack_content: str, service_name: str) -> bool:
+    payload = yaml.safe_load(stack_content)
+    if not isinstance(payload, dict):
+        return False
+
+    services = payload.get("services")
+    if not isinstance(services, dict):
+        return False
+
+    return service_name in services
+
+
 
 
 def portainer_ensure_running_remote_cmd(*, https_port: int) -> str:
@@ -208,9 +263,11 @@ def docker_login_local(*, registry: str, username: str, token: str) -> None:
     )
 
 
-def build_and_push_local_image(*, repo_root: Path, app_image: str, dockerfile: str) -> None:
+def build_and_push_local_image(*, repo_root: Path, app_image: str, dockerfile: str, allow_missing_dockerfile: bool = False) -> bool:
     dockerfile_path = repo_root / dockerfile
     if not dockerfile_path.exists():
+        if allow_missing_dockerfile:
+            return False
         raise SystemExit(f"Dockerfile not found for build/push: {dockerfile_path}")
     context_dir = str(Path(dockerfile).parent)
     if context_dir == "":
@@ -219,6 +276,7 @@ def build_and_push_local_image(*, repo_root: Path, app_image: str, dockerfile: s
     push_cmd = build_docker_push_cmd(app_image=app_image)
     subprocess.run(build_cmd, cwd=str(repo_root), check=True)
     subprocess.run(push_cmd, cwd=str(repo_root), check=True)
+    return True
 
 
 
@@ -247,6 +305,181 @@ def parse_boolish(value: str, *, default: bool = False) -> bool:
     if normalized in {"0", "false", "no", "n", "off"}:
         return False
     return default
+
+
+def _normalize_compose_labels(labels: Any) -> dict[str, str]:
+    if isinstance(labels, dict):
+        return {str(k): str(v) for k, v in labels.items()}
+
+    out: dict[str, str] = {}
+    if isinstance(labels, list):
+        for item in labels:
+            text = str(item or "")
+            if "=" not in text:
+                continue
+            key, value = text.split("=", 1)
+            out[str(key).strip()] = str(value).strip()
+    return out
+
+
+def _coerce_label_value(value: Any) -> Any:
+    """Coerce compose label values into scalar Python types.
+
+    Values are parsed with ``yaml.safe_load`` to support convenient label syntax
+    such as ``"14" -> 14`` and ``"true" -> True`` for algorithm params.
+    Non-scalar YAML values fall back to the original string input.
+    """
+    if not isinstance(value, str):
+        return value
+    parsed = yaml.safe_load(value)
+    if isinstance(parsed, (str, int, float, bool)) or parsed is None:
+        return parsed
+    return value
+
+
+def collect_storage_manager_registrations(*, stack_content: str) -> list[dict[str, Any]]:
+    payload = yaml.safe_load(stack_content)
+    if not isinstance(payload, dict):
+        return []
+
+    services = payload.get("services")
+    if not isinstance(services, dict):
+        return []
+
+    registrations_by_service: list[tuple[str, int, dict[str, Any]]] = []
+
+    for service_name, service_payload in services.items():
+        if not isinstance(service_payload, dict):
+            continue
+
+        normalized_labels = _normalize_compose_labels(service_payload.get("labels"))
+        buckets: dict[int, dict[str, Any]] = {}
+
+        for label_key, label_value in normalized_labels.items():
+            match = _STORAGE_MANAGER_LABEL_PATTERN.match(label_key)
+            if not match:
+                continue
+
+            index = int(match.group(1))
+            key = str(match.group(2)).strip()
+            if not key:
+                continue
+
+            if index not in buckets:
+                buckets[index] = {}
+
+            buckets[index][key] = _coerce_label_value(label_value)
+
+        for index, values in buckets.items():
+            required = ["volume", "path", "algorithm"]
+            missing = [field for field in required if not values.get(field)]
+            if missing:
+                missing_fields = ", ".join(missing)
+                raise SystemExit(
+                    "Invalid storage-manager label registration in service "
+                    f"'{service_name}' index {index}: missing required fields: {missing_fields}"
+                )
+
+            params = {
+                key: value
+                for key, value in values.items()
+                if key not in {"volume", "path", "algorithm", "description"}
+            }
+
+            registration: dict[str, Any] = {
+                "volume_name": str(values["volume"]),
+                "path": str(values["path"]),
+                "algorithm": str(values["algorithm"]),
+                "params": params,
+                "source_service": str(service_name),
+                "source_index": index,
+            }
+            if values.get("description") is not None:
+                registration["description"] = str(values["description"])
+
+            registrations_by_service.append((str(service_name), index, registration))
+
+    registrations_by_service.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in registrations_by_service]
+
+
+def _storage_manager_register_url(api_url: str) -> str:
+    base = str(api_url or "").strip().rstrip("/")
+    if base.endswith("/api/register"):
+        return base
+    return f"{base}/api/register"
+
+
+def register_storage_manager_registrations(
+    *,
+    api_url: str,
+    registrations: list[dict[str, Any]],
+    timeout_seconds: int = 10,
+) -> None:
+    endpoint = _storage_manager_register_url(api_url)
+
+    for item in registrations:
+        payload: dict[str, Any] = {
+            "volume_name": item["volume_name"],
+            "path": item["path"],
+            "algorithm": item["algorithm"],
+            "params": item.get("params") or {},
+        }
+        if item.get("description"):
+            payload["description"] = item["description"]
+
+        response = requests.post(endpoint, json=payload, timeout=timeout_seconds)
+        if response.status_code < 200 or response.status_code >= 300:
+            detail = str(response.text or "").strip()
+            source_service = str(item.get("source_service") or "unknown")
+            source_index = str(item.get("source_index") or "?")
+            raise SystemExit(
+                f"Storage registration failed for {source_service}[{source_index}] via {endpoint}: "
+                f"HTTP {response.status_code} {detail}"
+            )
+
+
+def _build_ubuntu_deploy_hook_plan(
+    *,
+    stack_name: str,
+    public_domain: str,
+    app_image: str,
+    web_port: str,
+    compose_files: list[str],
+    storage_manager_api_url: str,
+    storage_registrations: list[dict[str, Any]],
+) -> deploy_hooks.DeployPlan:
+    parsed_web_port = int(str(web_port or "3000"))
+    return deploy_hooks.DeployPlan(
+        name=stack_name,
+        location="ubuntu",
+        dns_label=public_domain,
+        deploy_mode="ubuntu",
+        compose_service_name="app",
+        deploy_role="app",
+        app_image=app_image,
+        caddy_image="",
+        other_image=None,
+        app_cpu=0.0,
+        app_memory=0.0,
+        caddy_cpu=0.0,
+        caddy_memory=0.0,
+        other_cpu=0.0,
+        other_memory=0.0,
+        public_domain=public_domain,
+        app_port=parsed_web_port,
+        app_ports=[parsed_web_port],
+        web_command=None,
+        extra_env={},
+        service_mode="app",
+        ftp_passive_range=None,
+        extra_metadata={
+            "compose_files": list(compose_files),
+            "storage_manager_api_url": storage_manager_api_url,
+            "storage_registrations": list(storage_registrations),
+            "enable_default_storage_registration": True,
+        },
+    )
 
 
 def main(argv: list[str] | None = None, repo_root_override: Path | None = None) -> None:
@@ -309,6 +542,30 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         action="store_true",
         help="Skip default local docker build+push before deployment",
     )
+    parser.add_argument(
+        "--hooks-module",
+        default=None,
+        help=(
+            "Optional hooks module path or import path for ubuntu deploy customizations. "
+            "Resolution: CLI -> DEPLOY_HOOKS_MODULE env var -> default scripts/deploy/deploy_customizations.py"
+        ),
+    )
+    parser.add_argument(
+        "--hooks-soft-fail",
+        action="store_true",
+        help=(
+            "When set, hook failures are logged and deployment continues. "
+            "Resolution precedence: CLI flag, else DEPLOY_HOOKS_SOFT_FAIL env var."
+        ),
+    )
+    parser.add_argument(
+        "--storage-manager-api-url",
+        default=None,
+        help=(
+            "Storage Manager API base URL (e.g. https://storage.example.com or https://storage.example.com/api/register). "
+            "Resolution: CLI -> STORAGE_MANAGER_API_URL env var -> .env.deploy"
+        ),
+    )
 
     args = parser.parse_args(argv)
 
@@ -325,6 +582,18 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         print(f"[ubuntu-deploy] {icon} {message}")
 
     repo_root = repo_root_override or Path(__file__).resolve().parents[2]
+    resolved_hooks_module = str(args.hooks_module or "").strip() or str(os.getenv(ENV_DEPLOY_HOOKS_MODULE) or "").strip() or None
+    resolved_hooks_soft_fail = bool(args.hooks_soft_fail)
+    if not resolved_hooks_soft_fail:
+        resolved_hooks_soft_fail = parse_boolish(str(os.getenv(ENV_DEPLOY_HOOKS_SOFT_FAIL) or "").strip(), default=False)
+
+    hooks = deploy_hooks.load_hooks(
+        repo_root=repo_root,
+        module_path=resolved_hooks_module,
+        soft_fail=resolved_hooks_soft_fail,
+    )
+    hook_ctx = deploy_hooks.DeployContext(repo_root=repo_root, env=os.environ, args=args)
+    hooks.call("pre_validate_env", hook_ctx)
 
     resolved_host = str(args.host or "").strip()
     if not resolved_host:
@@ -353,11 +622,23 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if not resolved_app_image:
         resolved_app_image = read_deploy_key(repo_root=repo_root, key=ENV_APP_IMAGE)
 
+    resolved_storage_manager_image = str(os.getenv(ENV_STORAGE_MANAGER_IMAGE) or "").strip()
+    if not resolved_storage_manager_image:
+        resolved_storage_manager_image = read_deploy_key(repo_root=repo_root, key=ENV_STORAGE_MANAGER_IMAGE)
+    if not resolved_storage_manager_image:
+        resolved_storage_manager_image = "ghcr.io/beejones/protected-container-storage-manager:latest"
+
     resolved_dockerfile = str(os.getenv(ENV_DOCKERFILE) or "").strip()
     if not resolved_dockerfile:
         resolved_dockerfile = read_deploy_key(repo_root=repo_root, key=ENV_DOCKERFILE)
     if not resolved_dockerfile:
         resolved_dockerfile = "docker/Dockerfile"
+
+    resolved_storage_manager_dockerfile = str(os.getenv(ENV_STORAGE_MANAGER_DOCKERFILE) or "").strip()
+    if not resolved_storage_manager_dockerfile:
+        resolved_storage_manager_dockerfile = read_deploy_key(repo_root=repo_root, key=ENV_STORAGE_MANAGER_DOCKERFILE)
+    if not resolved_storage_manager_dockerfile:
+        resolved_storage_manager_dockerfile = "docker/storage-manager/Dockerfile"
 
     resolved_build_push_enabled = not bool(args.skip_build_push)
     if resolved_build_push_enabled:
@@ -418,6 +699,14 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if not resolved_portainer_endpoint_id:
         resolved_portainer_endpoint_id = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_ENDPOINT_ID)
 
+    resolved_storage_manager_api_url = str(args.storage_manager_api_url or "").strip()
+    if not resolved_storage_manager_api_url:
+        resolved_storage_manager_api_url = str(os.getenv(ENV_STORAGE_MANAGER_API_URL) or "").strip()
+    if not resolved_storage_manager_api_url:
+        resolved_storage_manager_api_url = read_deploy_key(repo_root=repo_root, key=ENV_STORAGE_MANAGER_API_URL)
+
+    hooks.call("post_validate_env", hook_ctx)
+
     resolved_ghcr_username = str(os.getenv(ENV_GHCR_USERNAME) or "").strip()
     if not resolved_ghcr_username:
         resolved_ghcr_username = read_deploy_key(repo_root=repo_root, key=ENV_GHCR_USERNAME)
@@ -429,10 +718,11 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if resolved_build_push_enabled:
         if not resolved_app_image:
             raise SystemExit("APP_IMAGE is required when build/push is enabled")
-        if resolved_app_image.startswith("ghcr.io/"):
+        needs_ghcr_auth = resolved_app_image.startswith("ghcr.io/") or resolved_storage_manager_image.startswith("ghcr.io/")
+        if needs_ghcr_auth:
             if not resolved_ghcr_username or not resolved_ghcr_token:
                 raise SystemExit(
-                    "GHCR_USERNAME and GHCR_TOKEN are required to build/push APP_IMAGE to ghcr.io. "
+                    "GHCR_USERNAME and GHCR_TOKEN are required to build/push GHCR images. "
                     "Set them in .env.deploy/.env.deploy.secrets or use --skip-build-push."
                 )
             log_step("Logging into GHCR for local build/push", icon="🔐")
@@ -444,6 +734,22 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             app_image=resolved_app_image,
             dockerfile=resolved_dockerfile,
         )
+
+        log_step("Building and pushing STORAGE_MANAGER_IMAGE locally", icon="🏗️")
+        storage_manager_built = build_and_push_local_image(
+            repo_root=repo_root,
+            app_image=resolved_storage_manager_image,
+            dockerfile=resolved_storage_manager_dockerfile,
+            allow_missing_dockerfile=True,
+        )
+        if not storage_manager_built:
+            log_info(
+                (
+                    f"{resolved_storage_manager_dockerfile} is missing; "
+                    "skipping local STORAGE_MANAGER_IMAGE build/push."
+                ),
+                icon="⚠️",
+            )
 
     has_portainer_api_auth = bool(resolved_portainer_access_token)
 
@@ -476,11 +782,53 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         stack_content=stack_file_content_remote,
         app_image=resolved_app_image,
     )
+    stack_includes_storage_manager = stack_has_service(
+        stack_content=stack_file_content,
+        service_name="storage-manager",
+    )
+    ghcr_images_in_stack = ghcr_images_from_stack(stack_content=stack_file_content)
+    if ghcr_images_in_stack and (not resolved_ghcr_username or not resolved_ghcr_token):
+        raise SystemExit(
+            "GHCR_USERNAME and GHCR_TOKEN are required for GHCR images in the Portainer stack. "
+            f"Detected GHCR images: {ghcr_images_in_stack}. "
+            "Set GHCR_USERNAME in .env.deploy and GHCR_TOKEN in .env.deploy.secrets."
+        )
+    storage_registrations = collect_storage_manager_registrations(stack_content=stack_file_content)
+
+    hook_public_domain = str(os.getenv(ENV_PUBLIC_DOMAIN) or "").strip()
+    if not hook_public_domain:
+        hook_public_domain = read_deploy_key(repo_root=repo_root, key=ENV_PUBLIC_DOMAIN)
+
+    hook_web_port = str(os.getenv(ENV_WEB_PORT) or "").strip()
+    if not hook_web_port:
+        hook_web_port = read_deploy_key(repo_root=repo_root, key=ENV_WEB_PORT)
+    if not hook_web_port:
+        hook_web_port = "3000"
+
+    hook_plan = _build_ubuntu_deploy_hook_plan(
+        stack_name=resolved_portainer_stack_name,
+        public_domain=hook_public_domain,
+        app_image=resolved_app_image,
+        web_port=hook_web_port,
+        compose_files=compose_files,
+        storage_manager_api_url=resolved_storage_manager_api_url,
+        storage_registrations=storage_registrations,
+    )
+    hooks.call("build_deploy_plan", hook_ctx, hook_plan)
+
+    hook_storage_api_url = str(hook_plan.extra_metadata.get("storage_manager_api_url") or "").strip()
+    hook_storage_registrations_raw = hook_plan.extra_metadata.get("storage_registrations")
+    if isinstance(hook_storage_registrations_raw, list):
+        storage_registrations = [item for item in hook_storage_registrations_raw if isinstance(item, dict)]
+    resolved_storage_manager_api_url = hook_storage_api_url or resolved_storage_manager_api_url
+    default_storage_registration_enabled = bool(hook_plan.extra_metadata.get("enable_default_storage_registration", True))
 
     log_step("Prepared deployment plan", icon="🧭")
     log_info(f"Target: {resolved_host}")
     log_info(f"Remote dir: {remote_dir}")
     log_info(f"Compose files: {compose_files}")
+    if storage_registrations:
+        log_info(f"Detected {len(storage_registrations)} storage-manager label registration(s)", icon="🧹")
 
     log_step("Checking SSH connectivity", icon="🔌")
     try:
@@ -547,19 +895,20 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         action="Failed to ensure Portainer is running on the remote host",
     )
 
-    if resolved_app_image and resolved_app_image.startswith("ghcr.io/") and resolved_ghcr_username and resolved_ghcr_token:
-        log_step("Logging into GHCR and pre-pulling APP_IMAGE on remote host", icon="🔐")
-        _run(
-            build_ssh_cmd(
-                host=resolved_host,
-                remote_command=ghcr_login_pull_remote_cmd(
-                    image=resolved_app_image,
-                    username=resolved_ghcr_username,
-                    token=resolved_ghcr_token,
+    if ghcr_images_in_stack and resolved_ghcr_username and resolved_ghcr_token:
+        for image in ghcr_images_in_stack:
+            log_step(f"Logging into GHCR and pre-pulling {image} on remote host", icon="🔐")
+            _run(
+                build_ssh_cmd(
+                    host=resolved_host,
+                    remote_command=ghcr_login_pull_remote_cmd(
+                        image=image,
+                        username=resolved_ghcr_username,
+                        token=resolved_ghcr_token,
+                    ),
                 ),
-            ),
-            action="Failed remote GHCR login/pull for APP_IMAGE",
-        )
+                action=f"Failed remote GHCR login/pull for image {image}",
+            )
 
     log_step("Ensuring Central Caddy Proxy is running", icon="🌐")
     # Check if the global proxy container exists
@@ -681,6 +1030,39 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             )
     else:
         log_info("PUBLIC_DOMAIN not set — skipping Caddy registration.", icon="⚠️")
+
+    if storage_registrations:
+        if default_storage_registration_enabled:
+            if resolved_storage_manager_api_url:
+                log_step("Registering storage-manager labels via API", icon="🧹")
+                register_storage_manager_registrations(
+                    api_url=resolved_storage_manager_api_url,
+                    registrations=storage_registrations,
+                )
+            else:
+                if stack_includes_storage_manager:
+                    log_info(
+                        "Storage-manager labels detected; STORAGE_MANAGER_API_URL not set. Registration remains active via storage-manager Docker label auto-discovery (no action required).",
+                        icon="ℹ️",
+                    )
+                else:
+                    log_info(
+                        "Storage-manager labels were detected but STORAGE_MANAGER_API_URL is not set; skipping registration.",
+                        icon="⚠️",
+                    )
+        else:
+            log_info("Default storage registration disabled by deploy hook.", icon="🪝")
+
+    hooks.call(
+        "post_deploy",
+        hook_ctx,
+        hook_plan,
+        {
+            "storage_registration_count": len(storage_registrations),
+            "storage_manager_api_url": resolved_storage_manager_api_url,
+            "default_storage_registration_enabled": default_storage_registration_enabled,
+        },
+    )
 
     print("[ubuntu-deploy] ✅ Done.")
 

@@ -1,5 +1,9 @@
 # Plan: Deployment Customization Hooks
 
+## Related Plans
+
+- Storage manager roadmap and phases: `planning/STORAGE_MANAGER.md`
+
 Goal: Provide **stable customization hooks** in the deployment scripts so camera-storage-viewer (or any downstream) can add/override behavior in **separate files** while keeping upstream deploy scripts mostly unchanged and easy to re-sync.
 
 This plan assumes the deploy entrypoints live under `scripts/deploy/` and generate ACI YAML plus run `az` commands.
@@ -264,6 +268,11 @@ This list is the **minimum set of hook behaviors** camera-storage-viewer needs t
 3. Add documentation section “Customizing deployments” referencing `DEPLOY_HOOKS_MODULE` and the default `deploy_customizations.py`.
 4. Add a sample customization file template (optional) under `docs/` (not enabled by default).
 5. Add tests for loader + execution ordering.
+
+### Cross-reference: Storage Manager deploy automation
+
+This hook framework should be used to keep storage registration automation upstream-friendly: see **Phase 4 — Ubuntu Deploy Registration Automation** in `planning/STORAGE_MANAGER.md`.
+Specifically, compose label discovery/registration for storage-manager should run through `scripts/deploy/ubuntu_deploy.py` extension points so downstream projects can customize behavior without forking core deploy flow.
 
 ---
 
