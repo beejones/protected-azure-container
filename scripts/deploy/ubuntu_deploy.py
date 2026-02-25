@@ -263,9 +263,11 @@ def docker_login_local(*, registry: str, username: str, token: str) -> None:
     )
 
 
-def build_and_push_local_image(*, repo_root: Path, app_image: str, dockerfile: str) -> None:
+def build_and_push_local_image(*, repo_root: Path, app_image: str, dockerfile: str, allow_missing_dockerfile: bool = False) -> bool:
     dockerfile_path = repo_root / dockerfile
     if not dockerfile_path.exists():
+        if allow_missing_dockerfile:
+            return False
         raise SystemExit(f"Dockerfile not found for build/push: {dockerfile_path}")
     context_dir = str(Path(dockerfile).parent)
     if context_dir == "":
@@ -274,6 +276,7 @@ def build_and_push_local_image(*, repo_root: Path, app_image: str, dockerfile: s
     push_cmd = build_docker_push_cmd(app_image=app_image)
     subprocess.run(build_cmd, cwd=str(repo_root), check=True)
     subprocess.run(push_cmd, cwd=str(repo_root), check=True)
+    return True
 
 
 
@@ -733,11 +736,20 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         )
 
         log_step("Building and pushing STORAGE_MANAGER_IMAGE locally", icon="🏗️")
-        build_and_push_local_image(
+        storage_manager_built = build_and_push_local_image(
             repo_root=repo_root,
             app_image=resolved_storage_manager_image,
             dockerfile=resolved_storage_manager_dockerfile,
+            allow_missing_dockerfile=True,
         )
+        if not storage_manager_built:
+            log_info(
+                (
+                    f"{resolved_storage_manager_dockerfile} is missing; "
+                    "skipping local STORAGE_MANAGER_IMAGE build/push."
+                ),
+                icon="⚠️",
+            )
 
     has_portainer_api_auth = bool(resolved_portainer_access_token)
 
