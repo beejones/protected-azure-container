@@ -220,12 +220,12 @@ def trigger_portainer_webhook(*, urls: list[str], insecure: bool, has_api_auth: 
     if saw_404:
         if not has_api_auth:
             raise SystemExit(
-                "Portainer webhook returned 404 for all known endpoints and no Portainer API auth is configured. "
+                "Portainer webhook returned 404 for all known endpoints and no Portainer access token is configured. "
                 "Set PORTAINER_ACCESS_TOKEN in .env.deploy.secrets "
                 "so the script can auto-resolve/create the correct stack webhook."
             )
         raise SystemExit(
-            "Portainer webhook returned 404 for all known endpoints even after API-assisted resolution. "
+            "Portainer webhook returned 404 for all known endpoints even after access-token-assisted resolution. "
             "Verify PORTAINER_STACK_NAME/PORTAINER_ENDPOINT_ID and ensure the stack exists in Portainer."
         )
     if last_error:

@@ -755,7 +755,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     if not (resolved_portainer_webhook_url or resolved_portainer_token or has_portainer_api_auth):
         raise SystemExit(
-            "Provide Portainer webhook URL/token or API auth (PORTAINER_ACCESS_TOKEN)"
+            "Provide Portainer webhook URL/token or Portainer access token (PORTAINER_ACCESS_TOKEN)"
         )
     if resolved_portainer_https_port < 1 or resolved_portainer_https_port > 65535:
         raise SystemExit("--portainer-https-port must be in range 1-65535")
@@ -965,7 +965,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             status_code = int(getattr(getattr(exc, "response", None), "status_code", 0) or 0)
             if status_code == 401:
                 raise SystemExit(
-                    "Portainer API returned 401 Unauthorized while using PORTAINER_ACCESS_TOKEN. "
+                    "Portainer access token was rejected (401 Unauthorized). "
                     "Update PORTAINER_ACCESS_TOKEN in .env.deploy.secrets and retry. "
                     "If you intentionally want webhook-only deploys, remove PORTAINER_ACCESS_TOKEN."
                 )
