@@ -755,7 +755,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     if not (resolved_portainer_webhook_url or resolved_portainer_token or has_portainer_api_auth):
         raise SystemExit(
-            "Provide Portainer webhook URL/token or API auth (PORTAINER_ACCESS_TOKEN)"
+            "Provide Portainer webhook URL/token or Portainer access token (PORTAINER_ACCESS_TOKEN)"
         )
     if resolved_portainer_https_port < 1 or resolved_portainer_https_port > 65535:
         raise SystemExit("--portainer-https-port must be in range 1-65535")
@@ -935,17 +935,42 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         log_info("Central proxy is already running.")
 
     if has_portainer_api_auth:
-        log_step("Deploying stack through Portainer API", icon="🌐")
-        resolved_portainer_webhook_url = portainer_helpers.resolve_portainer_webhook_url_via_api(
+        log_step("Testing Portainer access token", icon="🔑")
+        if not portainer_helpers.is_portainer_access_token_valid(
             host=resolved_host,
             https_port=resolved_portainer_https_port,
             insecure=resolved_portainer_webhook_insecure,
-            stack_name=resolved_portainer_stack_name,
-            endpoint_id=resolved_portainer_endpoint_id,
             access_token=resolved_portainer_access_token,
-            stack_file_content=stack_file_content,
-            ssh_run_fn=lambda remote_command: _run(build_ssh_cmd(host=resolved_host, remote_command=remote_command)),
-        )
+        ):
+            raise SystemExit(
+                "Portainer access token is invalid or expired. "
+                "Update PORTAINER_ACCESS_TOKEN in .env.deploy.secrets and retry. "
+                "If you intentionally want webhook-only deploys, remove PORTAINER_ACCESS_TOKEN."
+            )
+
+    if has_portainer_api_auth:
+        log_step("Deploying stack through Portainer API", icon="🌐")
+        try:
+            resolved_portainer_webhook_url = portainer_helpers.resolve_portainer_webhook_url_via_api(
+                host=resolved_host,
+                https_port=resolved_portainer_https_port,
+                insecure=resolved_portainer_webhook_insecure,
+                stack_name=resolved_portainer_stack_name,
+                endpoint_id=resolved_portainer_endpoint_id,
+                access_token=resolved_portainer_access_token,
+                stack_file_content=stack_file_content,
+                ssh_run_fn=lambda remote_command: _run(build_ssh_cmd(host=resolved_host, remote_command=remote_command)),
+            )
+        except requests.HTTPError as exc:
+            status_code = int(getattr(getattr(exc, "response", None), "status_code", 0) or 0)
+            if status_code == 401:
+                raise SystemExit(
+                    "Portainer access token was rejected (401 Unauthorized). "
+                    "Update PORTAINER_ACCESS_TOKEN in .env.deploy.secrets and retry. "
+                    "If you intentionally want webhook-only deploys, remove PORTAINER_ACCESS_TOKEN."
+                )
+            else:
+                raise
 
     if has_portainer_api_auth and not resolved_portainer_webhook_url:
         log_step("Stack deployed via Portainer API; webhook token not returned, skipping webhook trigger", icon="✅")

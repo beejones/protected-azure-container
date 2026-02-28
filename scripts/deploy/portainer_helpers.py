@@ -152,6 +152,37 @@ def resolve_portainer_webhook_url_via_api(
     return ""
 
 
+def is_portainer_access_token_valid(
+    *,
+    host: str,
+    https_port: int,
+    insecure: bool,
+    access_token: str,
+) -> bool:
+    """Return whether the provided Portainer access token is currently valid.
+
+    A 401 means the token is invalid/expired. Other non-2xx responses are treated
+    as hard failures because they indicate connectivity or server-side issues.
+    """
+
+    headers = _portainer_auth_headers(access_token=access_token)
+    if not headers:
+        return False
+
+    hostname = extract_ssh_hostname(host).strip()
+    base_url = f"https://{hostname}:{https_port}"
+
+    resp = requests.get(f"{base_url}/api/endpoints", headers=headers, verify=not insecure, timeout=20)
+    if int(resp.status_code) == 401:
+        return False
+    resp.raise_for_status()
+
+    payload = resp.json()
+    if not isinstance(payload, list):
+        raise SystemExit("Unexpected Portainer /api/endpoints response format")
+    return True
+
+
 def build_portainer_webhook_urls_from_token(*, host: str, https_port: int, webhook_token: str) -> list[str]:
     hostname = extract_ssh_hostname(host).strip()
     token = webhook_token.strip()
@@ -189,12 +220,12 @@ def trigger_portainer_webhook(*, urls: list[str], insecure: bool, has_api_auth: 
     if saw_404:
         if not has_api_auth:
             raise SystemExit(
-                "Portainer webhook returned 404 for all known endpoints and no Portainer API auth is configured. "
+                "Portainer webhook returned 404 for all known endpoints and no Portainer access token is configured. "
                 "Set PORTAINER_ACCESS_TOKEN in .env.deploy.secrets "
                 "so the script can auto-resolve/create the correct stack webhook."
             )
         raise SystemExit(
-            "Portainer webhook returned 404 for all known endpoints even after API-assisted resolution. "
+            "Portainer webhook returned 404 for all known endpoints even after access-token-assisted resolution. "
             "Verify PORTAINER_STACK_NAME/PORTAINER_ENDPOINT_ID and ensure the stack exists in Portainer."
         )
     if last_error:
