@@ -205,7 +205,7 @@ New algorithms are added by subclassing `CleanupAlgorithm` and registering them 
 
 ## File Organization
 
-Following `AGENT.md` conventions:
+Following `AGENTS.md` conventions:
 
 ```
 docker/

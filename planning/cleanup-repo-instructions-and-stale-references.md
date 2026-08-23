@@ -3,7 +3,7 @@
 ## Principles
 
 - Repo instructions, planning files, and issue templates must describe this deployment toolkit, not inherited behavior from another codebase.
-- `AGENT.md`, `AGENT_APP_SPECIFIC.md`, `.github/agents`, `.github/skills`, and planning/docs should tell one coherent story about Compose-driven deploys, env schema, hooks, shared Caddy routing, and Ubuntu/Azure targets.
+- `AGENTS.md`, `AGENT_APP_SPECIFIC.md`, `.github/agents`, `.github/skills`, and planning/docs should tell one coherent story about Compose-driven deploys, env schema, hooks, shared Caddy routing, and Ubuntu/Azure targets.
 - Cleanup should remove contradictory or misleading references while preserving useful historical planning context where it is still relevant.
 - Validation for this cleanup is contract-focused: no stale cross-repo terminology should remain in the targeted files after the edit.
 
@@ -16,7 +16,7 @@
 
 ## Completion Notes
 
-- `AGENT.md` was rewritten to describe this deployment toolkit rather than the copied stock-dashboard app.
+- `AGENTS.md` was rewritten to describe this deployment toolkit rather than the copied stock-dashboard app.
 - Stale stock-dashboard wording was removed from the targeted planning files and issue template.
 - The final stale-reference sweep returned matches only inside this cleanup plan's own meta text and search command, which is acceptable.
 - This plan is complete and kept in `planning/` because the repo does not currently define a separate archive location or archived-plan naming convention.
@@ -26,7 +26,7 @@
 Identify remaining copied references from the stock-dashboard repo and confirm whether each one is stale, historical, or intentionally generic.
 
 Files expected to be reviewed:
-- `AGENT.md`
+- `AGENTS.md`
 - `planning/UBUNTU_SERVER_DEPLOYMENT.md`
 - `planning/STORAGE_MANAGER.md`
 - `.github/ISSUE_TEMPLATE/bug_report.md`
@@ -39,7 +39,7 @@ Files expected to be reviewed:
 
 ## Phase 1: Rewrite Top-Level Instructions
 
-Update `AGENT.md` so it matches this repo's actual structure and workflows.
+Update `AGENTS.md` so it matches this repo's actual structure and workflows.
 
 Expected outcomes:
 - Replace stock-dashboard project context with deployment-toolkit context.
@@ -48,7 +48,7 @@ Expected outcomes:
 
 ### Exit Criteria
 
-- `AGENT.md` reflects the current repo accurately.
+- `AGENTS.md` reflects the current repo accurately.
 - Top-level instructions do not contradict `AGENT_APP_SPECIFIC.md` or the current `.github/agents` / `.github/skills` files.
 
 ## Phase 2: Clean Planning And Template References
@@ -70,7 +70,7 @@ Expected outcomes:
 Validation commands:
 
 ```bash
-grep -RInE "stock[- ]dashboard|STOCK_DASHBOARD|trade strategy|optimizer|watchlist|analyzer|trader|HistoricalDataStore|signal pipeline" AGENT.md .github planning docs tests scripts
+grep -RInE "stock[- ]dashboard|STOCK_DASHBOARD|trade strategy|optimizer|watchlist|analyzer|trader|HistoricalDataStore|signal pipeline" AGENTS.md .github planning docs tests scripts
 ```
 
 Plus diagnostics checks on edited markdown files.

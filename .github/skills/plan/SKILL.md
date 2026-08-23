@@ -39,7 +39,7 @@ Use this skill to produce plans that match this repository's expectations:
 Stay read-only while planning. Do not implement code in the same pass unless the user explicitly pivots from planning to implementation.
 
 Gather only the context needed to make a credible plan:
-- Read `AGENT.md` and `.github/copilot-instructions.md` if not already loaded.
+- Read `AGENTS.md` and `.github/copilot-instructions.md` if not already loaded.
 - Read the relevant source, tests, docs, config, and existing planning files.
 - Identify local patterns, ownership boundaries, canonical helpers, and validation commands.
 - Note unresolved requirements as assumptions or open questions.

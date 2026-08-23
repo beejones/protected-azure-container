@@ -35,7 +35,7 @@ Preserve all observable behavior:
 
 ## Required Repo Guardrails
 
-- Read `AGENT.md` and `.github/copilot-instructions.md` before broad simplification.
+- Read `AGENTS.md` and `.github/copilot-instructions.md` before broad simplification.
 - Never read `.env.secrets` or `.env.deploy.secrets`.
 - For Python production or test edits, read `.github/skills/typed-code-generation/SKILL.md` before changing code.
 - Keep changes scoped to the user request and nearby touched code.

@@ -1,6 +1,6 @@
 ---
 name: documentation-and-adrs
-description: "Use when: updating docs, writing ADR-style rationale, changing public APIs or strategy contracts, documenting module principles, explaining architecture decisions, maintaining AGENT.md instructions, or recording user-facing behavior changes."
+description: "Use when: updating docs, writing ADR-style rationale, changing public APIs or strategy contracts, documenting module principles, explaining architecture decisions, maintaining AGENTS.md instructions, or recording user-facing behavior changes."
 ---
 
 # Documentation And ADRs Skill
@@ -14,7 +14,7 @@ Repo rule: when modifying a module, review the corresponding `docs/<module>/` ar
 ## When To Use
 
 - Changing public API behavior, strategy JSON contracts, data-source behavior, analyzer/optimizer workflows, or deployment behavior.
-- Adding or modifying docs under `docs/`, `planning/`, `analysis/`, or `AGENT.md`.
+- Adding or modifying docs under `docs/`, `planning/`, `analysis/`, or `AGENTS.md`.
 - Making a durable architecture decision or rejecting meaningful alternatives.
 - Repeating the same explanation in chat or code review.
 - Updating custom skills, instructions, agents, or workflow guidance.
@@ -66,7 +66,7 @@ Ask:
 - Module behavior -> `docs/<module>/`.
 - Active work breakdown -> `planning/`.
 - Evidence or decision report -> `analysis/`.
-- Agent operating rule -> `AGENT.md` or `.github/skills/<name>/SKILL.md`.
+- Agent operating rule -> `AGENTS.md` or `.github/skills/<name>/SKILL.md`.
 - User-facing README/setup behavior -> `README.md` or relevant setup docs.
 
 Avoid duplicate docs. Prefer updating the canonical doc and linking to it.
@@ -92,7 +92,7 @@ Check links, command accuracy, file paths, and consistency with code. If docs me
 - TODOs left where a small fix would solve the issue.
 - Planning files left active after all tasks are complete.
 - Strategy or API contract changes described only in chat.
-- AGENT.md grows with detailed workflow content that belongs in a skill.
+- AGENTS.md grows with detailed workflow content that belongs in a skill.
 
 ## Exit Criteria
 

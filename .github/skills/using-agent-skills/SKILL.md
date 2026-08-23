@@ -1,6 +1,6 @@
 ---
 name: using-agent-skills
-description: "Use when: starting a session, deciding which repo skill applies, routing ambiguous work, chaining multiple skills, or updating AGENT.md skill awareness. Meta-skill for local skill discovery and workflow selection."
+description: "Use when: starting a session, deciding which repo skill applies, routing ambiguous work, chaining multiple skills, or updating AGENTS.md skill awareness. Meta-skill for local skill discovery and workflow selection."
 ---
 
 # Using Agent Skills
@@ -9,7 +9,7 @@ description: "Use when: starting a session, deciding which repo skill applies, r
 
 This is the local skill router for Stock Dashboard. Use it to choose the smallest applicable workflow skill before starting non-trivial work.
 
-`AGENT.md` stays the compact always-on index. This skill holds the fuller routing rules so agents can load it only when needed.
+`AGENTS.md` stays the compact always-on index. This skill holds the fuller routing rules so agents can load it only when needed.
 
 ## Core Rules
 
@@ -101,7 +101,7 @@ This is the local skill router for Stock Dashboard. Use it to choose the smalles
 
 ## Adding More Skills
 
-Add more skills only when they encode recurring project work. For one-off guidance, keep `AGENT.md` concise and avoid cluttering discovery.
+Add more skills only when they encode recurring project work. For one-off guidance, keep `AGENTS.md` concise and avoid cluttering discovery.
 
 ## Anti-Patterns
 

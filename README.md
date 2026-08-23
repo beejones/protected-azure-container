@@ -127,7 +127,7 @@ Internet → Caddy (443) → [Basic Auth] → code-server (8080)
 
 ## Agent Workflow Skills
 
-This repository includes repo-specific AI coding workflow skills under `.github/skills/` and agent guidance in `AGENT.md`. These files are original, deployment-focused adaptations inspired by [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills), created by [Addy Osmani](https://github.com/addyosmani). The upstream project is used as workflow inspiration; the local skills here are tailored to this deployment toolkit's contracts, validation commands, and security boundaries.
+This repository includes repo-specific AI coding workflow skills under `.github/skills/` and agent guidance in `AGENTS.md`. These files are original, deployment-focused adaptations inspired by [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills), created by [Addy Osmani](https://github.com/addyosmani). The upstream project is used as workflow inspiration; the local skills here are tailored to this deployment toolkit's contracts, validation commands, and security boundaries.
 
 ## Use This Repo As A Template
 

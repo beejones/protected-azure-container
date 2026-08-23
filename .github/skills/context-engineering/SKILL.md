@@ -10,7 +10,7 @@ description: "Use when: starting a session, switching modules, preparing a featu
 Context engineering means feeding the agent the right information at the right time. Too little context leads to invented APIs and missed repo rules. Too much context makes the task blurry and increases the chance of using stale or irrelevant details.
 
 For Stock Dashboard, context engineering is the workflow for deliberately packing:
-- Always-on rules from `AGENT.md` and `.github/copilot-instructions.md`.
+- Always-on rules from `AGENTS.md` and `.github/copilot-instructions.md`.
 - The applicable skill files.
 - The relevant plan, docs, source files, tests, and one local example pattern.
 - The latest focused errors, logs, or artifacts for the current iteration.
@@ -28,7 +28,7 @@ For Stock Dashboard, context engineering is the workflow for deliberately packin
 
 Load context from most stable to most task-specific:
 
-1. Rules: `AGENT.md`, `.github/copilot-instructions.md`, and this repo's active skills.
+1. Rules: `AGENTS.md`, `.github/copilot-instructions.md`, and this repo's active skills.
 2. Work artifact: planning file, analysis report, issue/PR notes, or user request.
 3. Architecture docs: relevant `docs/<module>/` files and durable analysis reports.
 4. Source files: files to edit, direct callers/callees, interfaces, schemas, and helpers.

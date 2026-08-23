@@ -72,7 +72,7 @@ These additions tighten migration safety, make the docs executable, and reduce a
 
 ## Phase 0 — Refactoring & Cleanup
 
-Perform the routine code cleanup and refactoring as defined in `AGENT.md` and `docs/CODE_PROMPTS.md`.
+Perform the routine code cleanup and refactoring as defined in `AGENTS.md` and `docs/CODE_PROMPTS.md`.
 
 **Tasks:**
 1. Remove all unused, unnecessary, or obsolete code.
@@ -81,7 +81,7 @@ Perform the routine code cleanup and refactoring as defined in `AGENT.md` and `d
 4. Ensure files follow PEP 8 and maintainability standards.
 
 **Exit Criteria:**
-- The codebase is clean, well-tested, and adheres to the guidelines in `AGENT.md`.
+- The codebase is clean, well-tested, and adheres to the guidelines in `AGENTS.md`.
 
 ---
 

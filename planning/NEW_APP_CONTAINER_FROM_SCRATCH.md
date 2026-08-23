@@ -25,7 +25,7 @@ The scaffold must be reproducible, idempotent where possible, and leave no secre
 > We start by copying our core repo files to the new repo we are creating. Copy:
 > - `.github/` (skip `.github/workflows/deploy.yml`)
 > - `.gitignore`
-> - `AGENT.md`
+> - `AGENTS.md`
 > - `AGENT_APP_SPECIFIC.md` and update for the new APP
 > - `LICENSE`
 > - `env.*.example` and create the basic `.env*` files
@@ -110,7 +110,7 @@ autonomously with good defaults, later confirming the upstream image. Decisions:
 - [x] Create `../hermes-agent` repo (git init + initial commit) at the confirmed path.
 - [x] Add `protected-azure-container` as submodule at `scripts/deploy/_protected_container`
       (pinned to the confirmed ref).
-- [x] Copy core files: `.github/` (excluding `workflows/deploy.yml`), `.gitignore`, `AGENT.md`,
+- [x] Copy core files: `.github/` (excluding `workflows/deploy.yml`), `.gitignore`, `AGENTS.md`,
       `LICENSE`.
 - [x] Copy `AGENT_APP_SPECIFIC.md` and rewrite it for the hermes agent app.
 - [x] Copy `env.*.example` and create the basic non-secret `.env*` working files
